@@ -1,0 +1,43 @@
+<html>
+<body>
+<pre>
+<h1>Build Log</h1>
+<h3>
+--------------------Configuration: FTPServer - Win32 Release--------------------
+</h3>
+<h3>Command Lines</h3>
+Creating temporary file "C:\DOCUME~1\ADMINI~1\LOCALS~1\Temp\RSP28.tmp" with contents
+[
+/nologo /MD /W3 /GX /ZI /Od /D "WIN32" /D "NDEBUG" /D "_WINDOWS" /D "_AFXDLL" /D "_MBCS" /FR"Release/" /Fp"Release/FTPServer.pch" /Yu"stdafx.h" /Fo"Release/" /Fd"Release/" /FD /c 
+"D:\WTD\DC250\四方标动程序\FTPServer（以太网程序）\FTPServerDlg.cpp"
+]
+Creating command line "cl.exe @C:\DOCUME~1\ADMINI~1\LOCALS~1\Temp\RSP28.tmp" 
+Creating temporary file "C:\DOCUME~1\ADMINI~1\LOCALS~1\Temp\RSP29.tmp" with contents
+[
+version.lib Win32TRDP_DLL.lib /nologo /subsystem:windows /incremental:no /pdb:"Release/TRDP通讯.pdb" /debug /machine:I386 /out:"Build/TRDP通讯.exe" 
+".\Release\ClientSocket.obj"
+".\Release\FTPServer.obj"
+".\Release\FTPServerDlg.obj"
+".\Release\ListenSocket.obj"
+".\Release\sharememoryclient.obj"
+".\Release\StdAfx.obj"
+".\Release\FTPServer.res"
+]
+Creating command line "link.exe @C:\DOCUME~1\ADMINI~1\LOCALS~1\Temp\RSP29.tmp"
+<h3>Output Window</h3>
+Compiling...
+FTPServerDlg.cpp
+d:\wtd\dc250\四方标动程序\ftpserver（以太网程序）\trdp\trdp_types.h(311) : warning C4200: nonstandard extension used : zero-sized array in struct/union
+d:\wtd\dc250\四方标动程序\ftpserver（以太网程序）\trdp\mclmcrrt.h(556) : warning C4005: 'LIBMWMCLBASE_API_EXTERN_C' : macro redefinition
+        d:\wtd\dc250\四方标动程序\ftpserver（以太网程序）\trdp\mclbase.h(44) : see previous definition of 'LIBMWMCLBASE_API_EXTERN_C'
+D:\WTD\DC250\四方标动程序\FTPServer（以太网程序）\FTPServerDlg.cpp(709) : warning C4101: 'temp' : unreferenced local variable
+Linking...
+LINK : warning LNK4075: ignoring /EDITANDCONTINUE due to /INCREMENTAL:NO specification
+
+
+
+<h3>Results</h3>
+TRDP通讯.exe - 0 error(s), 4 warning(s)
+</pre>
+</body>
+</html>

@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="gb2312"?>
+<soft soft-device-name="250能量计">
+<device id="1" name="漏电监测" comm-type="series" softname-ch="" softname-en="" loadid="" host-name="device1" leader-name="device1" type="dummy">
+    <para baudrate="9600" databit="8" stopbit="1" checkstyle="奇校验"></para>
+</device>
+<device id="2" name="标动轴温报警" comm-type="TCPClient" softname-ch="" softname-en="" loadid="" host-name="device1" leader-name="device1" type="dummy">
+    <para port="6666" ipcount="8" ip1="10.1.1.213" ip1name="1车" ip2="" ip2name=""> </para>
+</device>
+<device id="3" name="下一代地铁TCMS" comm-type="TRDPhost" softname-ch="" softname-en="" loadid="" host-name="device1" leader-name="device1" type="dummy">
+    <para localip="10.3.0.10" port="6666" ipcount="8" ip1="10.1.1.213" ip1name="1车" ip2="" ip2name=""> 
+<source id="1" uri="10.3.1.240" comid="2400"></source>
+<source id="2" uri="10.3.2.240" comid="2400"></source>
+<source id="3" uri="10.3.3.240" comid="2400"></source>
+<source id="4" uri="10.3.4.240" comid="2400"></source>
+<source id="5" uri="10.3.5.240" comid="2400"></source>
+<source id="6" uri="10.3.6.240" comid="2400"></source>
+<destination id="1" uri="10.3.1.240" comid="2401"></destination>
+<destination id="2" uri="10.3.2.240" comid="2401"></destination>
+<destination id="3" uri="10.3.3.240" comid="2401"></destination>
+<destination id="4" uri="10.3.4.240" comid="2401"></destination>
+<destination id="5" uri="10.3.5.240" comid="2401"></destination>
+<destination id="6" uri="10.3.6.240" comid="2401"></destination>
+<source id="1" uri="10.3.1.241" comid="2402"></source>
+<source id="2" uri="10.3.2.241" comid="2402"></source>
+<source id="3" uri="10.3.3.241" comid="2402"></source>
+<source id="4" uri="10.3.4.241" comid="2402"></source>
+<source id="5" uri="10.3.5.241" comid="2402"></source>
+<source id="6" uri="10.3.6.241" comid="2402"></source>
+<destination id="1" uri="10.3.1.241" comid="2403"></destination>
+<destination id="2" uri="10.3.2.241" comid="2403"></destination>
+<destination id="3" uri="10.3.3.241" comid="2403"></destination>
+<destination id="4" uri="10.3.4.241" comid="2403"></destination>
+<destination id="5" uri="10.3.5.241" comid="2403"></destination>
+<destination id="6" uri="10.3.6.241" comid="2403"></destination>
+
+</para>
+</device>
+<device id="4" name="下一代地铁分主机" comm-type="TRDPsub" softname-ch="" softname-en="" loadid="" host-name="device1" leader-name="device1" type="dummy">
+    <para localip="10.3.0.10">
+<source id="1" uri="10.3.0.10" comid="2403"></source>
+<destination id="1" uri="10.3.0.10" comid="2402"></destination>
+ </para>
+</device>
+<device id="5" name="250轴温" comm-type="TRDPhost" softname-ch="" softname-en="" loadid="" host-name="device1" leader-name="device1" type="dummy">
+    <para localip="239.255.2.0">
+<destination id="1" uri="10.0.1.160" comid="1100" portsize="1200" cycle="30"></destination>
+<destination id="2" uri="10.0.1.161" comid="1100" portsize="1200" cycle="30"></destination>
+<destination id="3" uri="10.0.2.160" comid="1100" portsize="1200" cycle="30"></destination>
+<destination id="4" uri="10.0.2.161" comid="1100" portsize="1200" cycle="30"></destination>
+<destination id="5" uri="10.0.3.160" comid="1100" portsize="1200" cycle="30"></destination>
+<destination id="6" uri="10.0.3.161" comid="1100" portsize="1200" cycle="30"></destination>
+<destination id="7" uri="10.0.4.160" comid="1100" portsize="1200" cycle="30"></destination>
+<destination id="8" uri="10.0.4.161" comid="1100" portsize="1200" cycle="30"></destination>
+<source id="1" uri="10.0.1.160" comid="2610" portsize="100" cycle="500"></source>
+<source id="2" uri="10.0.1.161" comid="2611" portsize="100" cycle="500"></source>
+<source id="3" uri="10.0.2.160" comid="2620" portsize="100" cycle="500"></source>
+<source id="4" uri="10.0.2.161" comid="2621" portsize="100" cycle="500"></source>
+<source id="5" uri="10.0.3.160" comid="2630" portsize="100" cycle="500"></source>
+<source id="6" uri="10.0.3.161" comid="2631" portsize="100" cycle="500"></source>
+<source id="7" uri="10.0.4.160" comid="2640" portsize="100" cycle="500"></source>
+<source id="8" uri="10.0.4.161" comid="2641" portsize="100" cycle="500"></source>
+
+ </para>
+</device>
+
+<device id="6" name="250能量计" comm-type="TRDPhost" softname-ch="" softname-en="" loadid="" host-name="device1" leader-name="device1" type="dummy">
+    <para localip="172.31.41.202">
+		<destination id="1" uri="172.31.41.11" comid="21128" portsize="25" cycle="250"></destination>
+		<source id="1" uri="172.31.41.11" comid="21127" portsize="65" cycle="250"></source>
+
+ </para>
+</device>
+
+</soft>

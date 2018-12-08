@@ -116,7 +116,7 @@ class CTRDPServerDlg : public CDialog
 		DWORD recvlen;
 
 		void OnStartTRDP();
-		DG_S32 trdp_pd_demo(DG_S32 *trdp_err_no);
+		DG_S32 trdp_pd_config();
 
 		void getPort();
 		void getConfig();           // 获取TRDP变量 与MVB变量 的映射关系 配置

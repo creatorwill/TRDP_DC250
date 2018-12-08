@@ -1,5 +1,6 @@
 // FTPServerDlg.cpp : implementation file
-//
+#include <string.h>
+#include <windows.h>
 #include "StdAfx.h"
 #include "TRDPServerDlg.h"
 #include "stdio.h"
@@ -9,14 +10,11 @@
 #include "winsock.h"
 #include "stdlib.h"
 
-#include <string.h>
-#include <windows.h>
-
 #pragma comment(lib,"wsock32.lib")
 #pragma comment(lib,"ws2_32.lib")
-#define DEBUG_PRINTF  // 添加调试控制窗口
 
-
+/* 调试窗口 */
+#define DEBUG_PRINTF  // 添加调试控制窗口，程序发布时，要屏蔽掉
 #ifdef DEBUG_PRINTF
 #include <io.h>
 #include <fcntl.h>
@@ -40,39 +38,29 @@ static char THIS_FILE[] = __FILE__;
 #endif
 
 
-
 #define RESERVED_MEMORY 160000
-
-static Csharememoryclient m_shareMemory;  // 共享内存
-
-#if 0
-typedef struct _ST_DATA_INFO {
-	char     strType[20]; 
-	unsigned data[20000];   // 数据
-} st_data_info;
-#endif 
-
-#define LENGTH_1701 1946
-#define LENGTH_1801 4666
+#define LENGTH_1701     1946
+#define LENGTH_1801     4666
+#define TRDPSENDTIMER   10
 
 enum TRDPPortEnum{
 	PUBLISH = 0,
 	SUBSCRIBE
 } trdpdir;
 
+static Csharememoryclient m_shareMemory;  // 共享内存
 
 unsigned char cData1701[2300] = {0}; // 1701 1702公共端口，记录内容，记录周期100ms，数据刷新应小于100ms，每小时整点生成一个文件，文件后缀为edf ，数据类型为0x42
 unsigned char cData1801[5000] = {0}; // 1801 1802 1301 1302 记录内容，记录周期1s，数据刷新周期500ms，每小时整点生成一个文件，文件后缀为eds，数据类型为0x43。
 unsigned char DeviceID = 0;
+
 /* 存放 TRDP数据。 */
 stTrdpDataInfo data_put_test[10];
 stTrdpDataInfo data_get_record[80]; 
 
-HANDLE  hWriteDRU1;  // 互斥量
-HANDLE  hWriteDRU2;  // 互斥量
-
 CString strFtpIP;           // ftp 服务器ip地址
-bool    isFileOpen = FALSE; // 文件是否被打开
+bool    isFileOpen1701 = FALSE; // 文件是否被打开
+bool    isFileOpen1801 = FALSE; // 文件是否被打开
 int     g_iCycleCnt = 0;    // trdp刷新时间计数，以10ms定时器为基准，适应其他周期的数据
 
 unsigned short g_iComTotalNum = 0; // 要记录变量的端口数量
@@ -107,14 +95,15 @@ TRDP_PD_INFO_T  pd_info[150];
 TRDP_PUB_T      pub_handle[5];      // 发布 句柄
 TRDP_SUB_T      sub_handle[180];    // 订阅 句柄
 
-#define TRDPSENDTIMER    10
+HANDLE  hWriteDRU1;  // 互斥量
+HANDLE  hWriteDRU2;  // 互斥量
 
 /* ==================================================================================
  * Local function declarations
  * ================================================================================*/
 static void print_log(void *pRefCon, VOS_LOG_T category, const CHAR8 *pTime, const CHAR8 *pFile, UINT16 line, const CHAR8 *pMsgStr);
 static void wait_for_msg();
-static DG_S32 trdp_pd_demo(DG_S32 *trdp_err_no);
+static DG_S32 trdp_pd_config();
 static void md_callback(void *ref, TRDP_APP_SESSION_T apph, const TRDP_MD_INFO_T *msg, UINT8 *data, UINT32 size);
 
 /* ==================================================================================
@@ -150,7 +139,11 @@ static void md_callback (void *ref, TRDP_APP_SESSION_T apph, const TRDP_MD_INFO_
 	is_msg_received = 1;
 }
 
-DG_S32 CTRDPServerDlg::trdp_pd_demo(DG_S32 *trdp_err_no)
+/**
+ * @brief    -- trdp_pd_config : trdp 端口配置， 发布与订阅
+ * @return   -- 
+ */
+DG_S32 CTRDPServerDlg::trdp_pd_config()
 {
 	for (int i = 0; i< g_iTRDP_record_size; i++) {
 		/* publish and subscribe telegrams */
@@ -329,7 +322,7 @@ BOOL CTRDPServerDlg::OnInitDialog()
 
 	m_status.SetWindowText(m_strInfo);
 
-	SetTimer(TRDPSENDTIMER, 10, NULL);  // 设置定时器 10ms
+	SetTimer(TRDPSENDTIMER, 1000, NULL);  // 设置定时器 1000ms
 
 	/* 启动线程 */
 	AfxBeginThread(ThreadTrdpDataProcess, NULL);
@@ -353,27 +346,23 @@ void CTRDPServerDlg::OnButton3()
 }
 
 /**
- * @brief    --  ThreadFileSync: FTP文件传输
+ * @brief    -- ThreadFileSync: FTP文件同步 ， 每10秒同步  
  * @param[ ] -- lpParam
  * @return   -- 
  */
 UINT ThreadFileSync(LPVOID lpParam)
 {
-	while(1) {
+	printf("start---{{ThreadFileSync}} ...\n");
 
-		printf("start thread 22 ...\n");
-		CFTPFunc ftp;
+	CFTPFunc ftp;
+	while(1) {
 		if (false == ftp.ConnectToServer("127.0.0.1", "liuwming", "12345678", 21)) { // 连接FTP服务器  
 			printf("No Connected!!");
 			continue;
 		}
 
-		ftp.findFileFTPServer(g_mapFileServer, ".");  // 当前文件
-
+		ftp.findFileFTPServer(g_mapFileServer, ".");           // 获取服务器文件列表
 		ftp.findFileLocal(g_mapFileLocal, "E://build Test1");  // 获取本地文件列表
-		//ftp.findFileLocal(g_mapFileLocal, "D://WTD//DC250//四方标动程序//TRDP");  // 获取本地文件列表
-
-		CString strFileName;
 
 		bool bUpload = ftp.checkFileWaitUpload(g_uploadFileList);  // 查找待上传文件信息
 		if (false == bUpload) {
@@ -389,83 +378,200 @@ UINT ThreadFileSync(LPVOID lpParam)
 			continue;
 		}
 
-		printf("\n\n");     
+		//printf("\n\n");     
+		CString strFileName;
 		POSITION posRemove = g_removeFileList.GetHeadPosition();
 		while (posRemove != NULL) {
 			strFileName =  g_removeFileList.GetNext(posRemove);
-			printf("remove [%s] \n", strFileName);   
+			//printf("remove [%s] \n", strFileName);   
 			bool bret = ftp.removeFile("./" + strFileName);  
-			printf("%d\n\n\n", bret);  
+			//printf("%d\n\n\n", bret);  
 		}
 
-		printf("\n\n");     
+		//printf("\n\n");     
 		POSITION posUpload = g_uploadFileList.GetHeadPosition();
 		while (posUpload != NULL) {
 			strFileName = g_uploadFileList.GetNext(posUpload);
-			printf("upLoad [%s] \n", strFileName);   
+			//printf("upLoad [%s] \n", strFileName);   
 			bool bret = ftp.UploadFile("E:/build Test1/" + strFileName, strFileName);  
-			printf("%d\n\n\n", bret);  
+			//printf("%d\n\n\n", bret);  
 		}
-
 
 		ftp.DisConnect();  // 传输完成后断开连接
 
-		Sleep(5000);	 // 延时5秒
+		Sleep(10000);	 
 	}
 
 	return 0;
 }
 
+#define REALDATASTOREDIR  "D:\\WTD_INFO\\实时数据"
+
 /**
- * @brief    -- ThreadFileRecord: 文件记录  记录间隔： 100ms , 500ms
+ * @brief    -- ThreadFileRecord: 文件记录  
  * @param[ ] -- lpParam
  * @return   -- 
  */
-
 UINT ThreadFileRecord(LPVOID lpParam)
 {
-	/* 记录文件，整点记录， 记录频率 */
-	CFile m_FileRecordMVBTraAllData;
+	printf("start {{ThreadFileRecord}} ...\n");
 
-	while(1) {
+	/* 记录文件，整点记录， 记录频率 :记录间隔： 100ms , 500ms */
+	/* 每小时生成一个文件；后缀分别为:edf、eds. */
 
-		printf("start thread 33 ...\n");
-		CString newstr = _T("./Trdp.db"); // 文件记录 文件名
+	/* 文件“000207_01_20160724000000.sbr”
+	 * 表示000207列动车组上 01 车安装的WTD设备于北京时间2016年7月24日00时00分00秒开始记录的二进制数据（实时状态数据）*/
 
+	bool bFirstStart = true; // 第一次启动 
 
-		if (!m_FileRecordMVBTraAllData.Open(newstr, CFile::modeCreate|CFile::shareDenyNone | CFile::modeWrite | CFile::typeBinary)) {
-			printf("Create MVBTraAll Record  Failed!");
-			printf("请检查文件夹!");
-			isFileOpen = FALSE;
+	CFile FileRecordMVBTraAllData1701;
+	CFile FileRecordMVBTraAllData1801;
+	int iCounter = 0;
+	CTime time;
+	CString newFile1801;
+	CString newFile1701;
+	unsigned char trainid[4] = {0x00, 0x02, 0x23, 0x11};
+	unsigned char CarID = 1;
+
+	time = CTime::GetCurrentTime();
+	CString date = time.Format("%Y%m%d%H%M%S");
+
+	newFile1701.Format("./1701File/%s.log", date);
+	newFile1801.Format("./1801File/%s.log", date);
+
+	// 第一次启动   按当前时间 创建文件，并开始记录 
+	CFileFind fFind;
+	if (!fFind.FindFile(newFile1701)) {
+		if (!FileRecordMVBTraAllData1701.Open(newFile1701, 
+					CFile::modeCreate |CFile::shareDenyNone | CFile::modeWrite | CFile::typeBinary)) {
+			printf("Create 1701File Record  Failed! \r\n");
+			isFileOpen1701 = FALSE;
 		} else {
-			isFileOpen = TRUE;		
+			isFileOpen1701 = TRUE;		
 		}	
-
-		WaitForSingleObject(hWriteDRU1, INFINITE);
-
-		if (isFileOpen) {				
-			m_FileRecordMVBTraAllData.Write(cData1701, LENGTH_1701);
-			m_FileRecordMVBTraAllData.Flush();		
-		}
-
-		ReleaseMutex(hWriteDRU1);
-
-		WaitForSingleObject(hWriteDRU2, INFINITE);
-
-		if (isFileOpen) {				
-			m_FileRecordMVBTraAllData.Write(cData1801, LENGTH_1801);
-			m_FileRecordMVBTraAllData.Flush();		
-		}
-
-		ReleaseMutex(hWriteDRU2);
-
-
-
-		Sleep(1000);	// 延时1秒
+	} else {
+		if (!FileRecordMVBTraAllData1701.Open(newFile1701, CFile::shareDenyNone | CFile::modeWrite | CFile::typeBinary)) {
+			printf("Create 1701File Record  Failed! \r\n");
+			isFileOpen1701 = FALSE;
+		} else {
+			isFileOpen1701 = TRUE;		
+		}	
 	}
 
-	m_FileRecordMVBTraAllData.Close();
-	isFileOpen = FALSE;					
+	if (!fFind.FindFile(newFile1801)) {
+		if (!FileRecordMVBTraAllData1801.Open(newFile1801, 
+					CFile::modeCreate |CFile::shareDenyNone | CFile::modeWrite | CFile::typeBinary)) {
+			printf("Create 1801File Record  Failed! \r\n");
+			isFileOpen1801 = FALSE;
+		} else {
+			isFileOpen1801 = TRUE;		
+		}	
+	} else {
+		if (!FileRecordMVBTraAllData1801.Open(newFile1801, CFile::shareDenyNone | CFile::modeWrite | CFile::typeBinary)) {
+			printf("Create 1801File Record  Failed! \r\n");
+			isFileOpen1801 = FALSE;
+		} else {
+			isFileOpen1801 = TRUE;		
+		}	
+	}
+
+	while (1) {  // 100ms
+		time = CTime::GetCurrentTime();
+		CString date = time.Format("%Y%m%d%H%M%S");
+		CString tHM = time.Format("%H%M%S");
+		int tHMS = _ttoi(tHM);
+
+#if 0
+		CString strTmp;
+		newFile1801 = _T(REALDATASTOREDIR);
+		newFile1801 += _T("\\");
+		strTmp = "";
+		strTmp.Format("%02d%02d_", trainid[2], trainid[3]);
+		newFile1801 += strTmp;
+
+		strTmp = "";
+		strTmp.Format("%02d_", CarID);
+		newFile1801 += strTmp;
+		newFile1801 += date;
+		newFile1801 += _T(".log");	
+#endif
+		tHM += _T("\r\n");
+
+		if ((tHMS % 10000) == 0) { // 整点 {{10000}} 1h生成 1个文件 
+
+			CFileFind fFind;
+
+			FileRecordMVBTraAllData1701.Close();
+			FileRecordMVBTraAllData1801.Close();
+			isFileOpen1701 = FALSE;
+			isFileOpen1801 = FALSE;
+			newFile1701.Format("./1701File/%s.log", date);
+			newFile1801.Format("./1801File/%s.log", date);
+
+			if (fFind.FindFile(newFile1701)) {  // 文件 已存在 ，继续写
+				if (!FileRecordMVBTraAllData1701.Open(newFile1701, CFile::shareDenyNone | CFile::modeWrite | CFile::typeBinary)) {
+					printf("Create 1701File Record  Failed! \r\n");
+					isFileOpen1701 = FALSE;
+				} else {
+					FileRecordMVBTraAllData1701.SeekToEnd(); 
+					isFileOpen1701 = TRUE;		
+				}	
+			} else { // 文件 不存在 ， 新建 
+				if (!FileRecordMVBTraAllData1701.Open(newFile1701, CFile::modeCreate |CFile::shareDenyNone | CFile::modeWrite | CFile::typeBinary)) {
+					printf("Create 1701File Record  Failed! \r\n");
+					isFileOpen1701 = FALSE;
+				} else {
+					FileRecordMVBTraAllData1701.SeekToBegin();  // 到达文件开头 
+					isFileOpen1701 = TRUE;		
+				}	
+			}
+
+			if (fFind.FindFile(newFile1801)) {  // 文件 已存在 ，继续写
+				if (!FileRecordMVBTraAllData1801.Open(newFile1801, CFile::shareDenyNone | CFile::modeWrite | CFile::typeBinary)) {
+					printf("Create 1801File Record  Failed! \r\n");
+					isFileOpen1801 = FALSE;
+				} else {
+					FileRecordMVBTraAllData1801.SeekToEnd(); 
+					isFileOpen1801 = TRUE;		
+				}	
+			} else { // 文件 不存在 ， 新建 
+				if (!FileRecordMVBTraAllData1801.Open(newFile1801, CFile::modeCreate |CFile::shareDenyNone | CFile::modeWrite | CFile::typeBinary)) {
+					printf("Create 1801File Record  Failed! \r\n");
+					isFileOpen1801 = FALSE;
+				} else {
+					FileRecordMVBTraAllData1801.SeekToBegin();  // 到达文件开头 
+					isFileOpen1801 = TRUE;		
+				}	
+			}
+		}
+
+		/* 100ms 记录 1701数据 */
+		WaitForSingleObject(hWriteDRU1, INFINITE);
+		if (isFileOpen1701) {				
+			//FileRecordMVBTraAllData1701.Write(tHM, tHM.GetLength());
+			FileRecordMVBTraAllData1701.Write(cData1701, tHM.GetLength());
+			FileRecordMVBTraAllData1701.Flush();		
+		}
+		ReleaseMutex(hWriteDRU1);
+
+		/* 1000ms 记录 1801数据 */
+		if ((iCounter % 10) == 0) {  // 1000ms
+			WaitForSingleObject(hWriteDRU2, INFINITE);
+			if (isFileOpen1801) {				
+				FileRecordMVBTraAllData1801.Write(cData1801, LENGTH_1801);
+				FileRecordMVBTraAllData1801.Flush();		
+			}
+			ReleaseMutex(hWriteDRU2);
+		}
+
+		iCounter++;
+		Sleep(100);  // 100ms
+	}
+
+	FileRecordMVBTraAllData1701.Close();
+	FileRecordMVBTraAllData1801.Close();
+	isFileOpen1701 = FALSE;					
+	isFileOpen1801 = FALSE;					
 
 	return 0;
 }
@@ -484,6 +590,7 @@ int m_nCurrentETBNNO;
  */
 UINT ThreadTrdpDataProcess(LPVOID lpParam)
 {
+	printf("start  {{ThreadTrdpDataProcess}} ...\n");
 
 	static iCounterLife = 0;
 	st_data_info dataRecord;  // mvb 初始化
@@ -525,16 +632,16 @@ UINT ThreadTrdpDataProcess(LPVOID lpParam)
 	HeadPacket[20] = 0;
 	HeadPacket[21] = 0;
 
-
 	while (true) {
 		if (g_iCycleCnt >= 65535) {
 			g_iCycleCnt = 0;
 		}
-		printf("start thread 11 ...\n");
 
 		/* 公共端口 {1701、1702}:刷新周期100ms， {1801、1802、1301、1302}:刷新周期500ms */
 		for (int i=0; i < g_iTRDP_common_size; i++) {
 			if ((g_iCycleCnt % (trdpport_comm[i].cycle / 10)) == 0) {  // 计算刷新周期
+			//	printf("g_iCycleCnt: %d, com:%d, cycle:%d \r\n", g_iCycleCnt, trdpport_comm[i].comid, trdpport_comm[i].cycle);
+
 				if (trdpport_comm[i].direction == PUBLISH) {					
 
 					iCounterLife++;
@@ -550,7 +657,7 @@ UINT ThreadTrdpDataProcess(LPVOID lpParam)
 					dataPut.data[1] = iCounterLife % 256;
 
 					ret_val = tlp_put(session_handle, pub_handle[i], (DG_U8*)&dataPut.data, trdpport_record[i].portsize);  
-					//printf("Put %x,return %d \r\n", trdpport[i].comid, ret_val);
+				//	printf("Put %d, return %d \r\n", trdpport_record[i].comid, ret_val);
 					tlc_process(session_handle, NULL, NULL);
 
 				} else if (trdpport_comm[i].direction == SUBSCRIBE) {
@@ -559,7 +666,7 @@ UINT ThreadTrdpDataProcess(LPVOID lpParam)
 					dataGet.lPort = trdpport_comm[i].comid;
 					dataGet.portSize = trdpport_comm[i].portsize;
 					ret_val = tlp_get(session_handle, sub_handle[i], &pd_info[i], (DG_U8*)&dataGet.data, &trdpport_comm[i].portsize);
-					//printf("Get %x,return %d \r\n", trdpport_comm[i].comid, ret_val);
+				//	printf("Get %d,return %d \r\n", trdpport_comm[i].comid, ret_val);
 
 					if (TRDP_NO_ERR == ret_val) {   // 收发数据无错误  -> 处理数据
 						/* 1，获取TRDP数据 */
@@ -666,6 +773,7 @@ UINT ThreadTrdpDataProcess(LPVOID lpParam)
 		/* dru过程数据 */
 		for (int j=0; j <  g_iTRDP_record_size; j++) {
 			if ((g_iCycleCnt % (trdpport_record[j].cycle / 10)) == 0) {  // 计算刷新周期
+				printf("g_iCycleCnt: %d, com:%d, cycle:%d \r\n", g_iCycleCnt, trdpport_record[j].comid, trdpport_record[j].cycle);
 
 				stTrdpDataInfo  dataGetRecord;
 				dataGetRecord.lPort = trdpport_record[j].comid;
@@ -673,7 +781,7 @@ UINT ThreadTrdpDataProcess(LPVOID lpParam)
 
 				ret_val = tlp_get(session_handle, sub_handle[j], &pd_info[j], (DG_U8*)&dataGetRecord.data, &trdpport_record[j].portsize);
 
-				printf("Get %x,return %d \r\n",trdpport_record[j].comid, ret_val);
+			//	printf("Get %d,return %d \r\n",trdpport_record[j].comid, ret_val);
 
 				if (TRDP_NO_ERR == ret_val) {   // 收发数据无错误  -> 处理数据
 					for (int ii = 0; ii < g_iComTotalNum; ii++) {
@@ -725,8 +833,6 @@ UINT ThreadTrdpDataProcess(LPVOID lpParam)
 
 	return 0;
 }
-
-
 
 
 /**
@@ -943,7 +1049,6 @@ void CTRDPServerDlg::OnStartTRDP()
 
 	path = path + pathtemp;	
 
-	DG_S32 trdp_err_no = 0;
 	DG_S32 ret_val = 0;
 
 	recv_length = sizeof(recv_buffer);
@@ -976,10 +1081,10 @@ void CTRDPServerDlg::OnStartTRDP()
 				&process_Config); /*use default ip*/
 
 	if (TRDP_NO_ERR == ret_val) {
-		ret_val = trdp_pd_demo(&trdp_err_no);
+		ret_val = trdp_pd_config();
 	}
 
-	printf("Result: %d\n", trdp_err_no);
+	printf("Result: %d\n", ret_val);
 }
 
 void CTRDPServerDlg::OnSysCommand(UINT nID, LPARAM lParam)

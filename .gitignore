@@ -1,16 +1,39 @@
-# 忽略所有 .a 结尾的文件
+# Created by https://www.gitignore.io/api/c++
+# Edit at https://www.gitignore.io/?templates=c++
+
+### C++ ###
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
 *.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
 *.log
 
-# 但 lib.a 除外
-!lib.a
-
-# 仅仅忽略项目根目录下的 TODO 文件，不包括 subdir/TODO
-/TODO
-
-# 忽略 build/ 目录下的所有文件
-1701File/
-1801File/
-
-# 会忽略 doc/notes.txt 但不包括 doc/server/notes.txt
-doc/notes.txt
+# End of https://www.gitignore.io/api/c++

@@ -31,7 +31,6 @@ UINT Csharememoryclient:: initsharememory()
 {
 	/* TRDP && MVB */
 	hMapFile_trdp2mvb = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, sizeof(st_shared_memory), "NewMemoryTrdpAndMvb");
-	
 	if (!hMapFile_trdp2mvb) {
 		AfxMessageBox(TEXT("创建映射对象失败"));
 		return 1;
@@ -39,7 +38,6 @@ UINT Csharememoryclient:: initsharememory()
 
 	DWORD dwMapErrTrdp = GetLastError();
 	memory_trdp_mvb = (st_shared_memory*)MapViewOfFile(hMapFile_trdp2mvb, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, 0);
-
 	if (NULL == memory_trdp_mvb) {
 		CloseHandle(hMapFile_trdp2mvb);
 		hMapFile_trdp2mvb = NULL;
@@ -47,7 +45,7 @@ UINT Csharememoryclient:: initsharememory()
 		return 1;
 	}
 
-	if (dwMapErrTrdp == ERROR_ALREADY_EXISTS) { //如果该共享内存已经存在
+	if (dwMapErrTrdp == ERROR_ALREADY_EXISTS) { // 如果该共享内存已经存在
 		memory_trdp_mvb->bFlag = true;
 	} else {
 		memory_trdp_mvb->bFlag = false;

@@ -106,6 +106,9 @@ static void wait_for_msg();
 static DG_S32 trdp_pd_config();
 static void md_callback(void *ref, TRDP_APP_SESSION_T apph, const TRDP_MD_INFO_T *msg, UINT8 *data, UINT32 size);
 
+static void compressExport();
+BOOL ExecCommand(CString strCmdLine);
+
 /* ==================================================================================
  * Local function implementations
  * ================================================================================*/
@@ -322,7 +325,7 @@ BOOL CTRDPServerDlg::OnInitDialog()
 
 	m_status.SetWindowText(m_strInfo);
 
-	SetTimer(TRDPSENDTIMER, 1000, NULL);  // 设置定时器 1000ms
+	SetTimer(TRDPSENDTIMER, 10000, NULL);  // 设置定时器 1000ms
 
 	/* 启动线程 */
 	AfxBeginThread(ThreadTrdpDataProcess, NULL);
@@ -476,11 +479,12 @@ UINT ThreadFileRecord(LPVOID lpParam)
 	}
 
 	while (1) {  // 100ms
-		time = CTime::GetCurrentTime();
+		time         = CTime::GetCurrentTime();
 		CString date = time.Format("%Y%m%d%H%M%S");
-		CString tHM = time.Format("%H%M%S");
-		int tHMS = _ttoi(tHM);
+		CString tHM  = time.Format("%H%M%S");
+		int tHMS     = _ttoi(tHM);
 
+		/* 文件路径 */
 #if 0
 		CString strTmp;
 		newFile1801 = _T(REALDATASTOREDIR);
@@ -580,8 +584,9 @@ UINT ThreadFileRecord(LPVOID lpParam)
 #define MCASTPORT  17224
 #define BUFSIZE    112
 
-int m_bIsCurrentETBNValid, m_nGETETBNThreaState;
-int m_nCurrentETBNNO;
+bool bIsCurrentETBNValid; 
+int	 iGetETBNThreaState;
+int  iCurrentETBNNO;
 
 /**
  * @brief    --  ThreadTrdpDataProcess: TRDP 数据刷新  周期：10ms
@@ -608,17 +613,17 @@ UINT ThreadTrdpDataProcess(LPVOID lpParam)
 	unsigned char SwVer = 0;
 	unsigned char CarInfID = 0;
 
-	HeadPacket[0] = 0xAA;
-	HeadPacket[1] = 0xAB;
-	HeadPacket[2] = 0xAC;
-	ULONG devid = DeviceID; 
+	HeadPacket[0]  = 0xAA;
+	HeadPacket[1]  = 0xAB;
+	HeadPacket[2]  = 0xAC;
+	ULONG devid    = DeviceID;
 	HeadPacket[3]  = (devid / 10000000) * 16 + (devid / 1000000) % 10;
 	HeadPacket[4]  = ((devid / 100000) % 10) * 16 +(devid / 10000) % 10;
 	HeadPacket[5]  = ((devid / 1000) % 10) * 16 + (devid / 100) % 10;
 	HeadPacket[6]  = ((devid / 10) % 10) * 16 + (devid) % 10;
 	HeadPacket[7]  = 0x00;   // version
-	HeadPacket[8] = (trainid[2])/10 * 16 + trainid[2]%10;
-	HeadPacket[9] = (trainid[3])/10 * 16 + trainid[3]%10;
+	HeadPacket[8]  = (trainid[2])/10 * 16 + trainid[2]%10;
+	HeadPacket[9]  = (trainid[3])/10 * 16 + trainid[3]%10;
 	HeadPacket[10] = CarID / 10 * 16 + CarID % 10;
 	HeadPacket[11] = 0x42;   // CarType
 	HeadPacket[12] = CarInfID;
@@ -631,6 +636,14 @@ UINT ThreadTrdpDataProcess(LPVOID lpParam)
 	HeadPacket[19] = 0;
 	HeadPacket[20] = 0;
 	HeadPacket[21] = 0;
+
+	for (UINT i = 0; i < 13; i++) {
+		cData1701[i] = HeadPacket[i];
+	}
+
+	cData1701[13] = (LENGTH_1701 - 26) % 256;
+	cData1701[14] = (LENGTH_1701 - 26) / 256;
+	cData1701[15] = HeadPacket[15];
 
 	while (true) {
 		if (g_iCycleCnt >= 65535) {
@@ -707,13 +720,6 @@ UINT ThreadTrdpDataProcess(LPVOID lpParam)
 								frameNumber1701.iCounter = 0;
 							}
 
-							for (UINT i = 0; i < 13; i++) {
-								cData1701[i] = HeadPacket[i];
-							}
-
-							cData1701[13] = (LENGTH_1701 - 26) % 256;
-							cData1701[14] = (LENGTH_1701 - 26) / 256;
-							cData1701[15] = HeadPacket[15];
 							cData1701[16] = 0;
 							cData1701[17] = frameNumber1701.cCounter[0];
 							cData1701[18] = frameNumber1701.cCounter[1];
@@ -773,7 +779,7 @@ UINT ThreadTrdpDataProcess(LPVOID lpParam)
 		/* dru过程数据 */
 		for (int j=0; j <  g_iTRDP_record_size; j++) {
 			if ((g_iCycleCnt % (trdpport_record[j].cycle / 10)) == 0) {  // 计算刷新周期
-				printf("g_iCycleCnt: %d, com:%d, cycle:%d \r\n", g_iCycleCnt, trdpport_record[j].comid, trdpport_record[j].cycle);
+				//printf("g_iCycleCnt: %d, com:%d, cycle:%d \r\n", g_iCycleCnt, trdpport_record[j].comid, trdpport_record[j].cycle);
 
 				stTrdpDataInfo  dataGetRecord;
 				dataGetRecord.lPort = trdpport_record[j].comid;
@@ -800,32 +806,6 @@ UINT ThreadTrdpDataProcess(LPVOID lpParam)
 				}
 			}
 		}
-
-
-#if 0
-		char *ip = "189.10.0.1";
-		memcpy(data_get_record[0].strIp, ip, strlen(ip));
-		data_get_record[0].Port = 1701;
-
-		data_get_record[0].data[0] = 0xff;
-		data_get_record[0].data[1] = 0xee;
-		data_get_record[0].data[2] = 0xfd;
-		data_get_record[0].data[3]++;
-		data_get_record[0].data[5] = 0xad;
-
-		//m_shareMemory.WriteTrdpDatatoMvb(&data_get_record[0], 0);
-		//m_shareMemory.ReadMvbDatatoTrdp(&data_put_test[0], 0);
-
-		CString strTmp100;
-		for (int c=0; c<100; c++) {
-			strTmp100.Format("%02X ", *(data_put_test[1].data + c));     // get data
-			m_TRDPReceive += strTmp100;
-		}
-
-		UpdateData(FALSE);
-
-		tlc_process(session_handle, NULL, NULL);
-#endif
 
 		g_iCycleCnt++;   // 频率：10ms
 		Sleep(10);	     // 延时10毫秒
@@ -1137,14 +1117,26 @@ HCURSOR CTRDPServerDlg::OnQueryDragIcon()
 void CTRDPServerDlg::OnTimer(UINT nIDEvent) 
 { 
 	// TODO: Add your message handler code here and/or call default
-	switch (nIDEvent) 
-	{
+	switch (nIDEvent) {
 		case TRDPSENDTIMER:  // 10ms
-			if (0 == getIP(strFtpIP))
-				printf("get IP OK!!");
 
+			compressExport();
+
+			if (0 == getIP(strFtpIP)) {
+				printf("get IP OK!!");
+			}
+
+			m_TRDPReceive.Empty();
+			CString strTmp100;
+			for (int c=0; c<100; c++) {
+				strTmp100.Format("%02X ", *(cData1701 + c));     // get data
+				m_TRDPReceive += strTmp100;
+			}
+
+			// UpdateData(FALSE);
 			break;
 	}
+
 	CDialog::OnTimer(nIDEvent);
 
 }
@@ -1158,8 +1150,8 @@ void CTRDPServerDlg::OnTimer(UINT nIDEvent)
  */
 int CTRDPServerDlg::getIP(CString &strIP)  
 {
-	m_bIsCurrentETBNValid = 0;
-	m_nCurrentETBNNO=0;
+	bIsCurrentETBNValid = 0;
+	iCurrentETBNNO=0;
 
 	WSADATA wsd;
 	struct sockaddr_in local, remote, from;
@@ -1174,7 +1166,7 @@ int CTRDPServerDlg::getIP(CString &strIP)
 	printf("init winsocket ....\n");
 
 	if (WSAStartup(MAKEWORD(2, 2), &wsd) != 0) {
-		m_nGETETBNThreaState = 0;
+		iGetETBNThreaState = 0;
 		return -1;
 	}
 
@@ -1182,7 +1174,7 @@ int CTRDPServerDlg::getIP(CString &strIP)
 					WSA_FLAG_MULTIPOINT_C_LEAF | WSA_FLAG_MULTIPOINT_D_LEAF | WSA_FLAG_OVERLAPPED)) == INVALID_SOCKET)
 	{
 		WSACleanup();
-		m_nGETETBNThreaState = 0;
+		iGetETBNThreaState = 0;
 		return -1;
 	}
 
@@ -1194,7 +1186,7 @@ int CTRDPServerDlg::getIP(CString &strIP)
 	if (bind(sock, (struct sockaddr*)&local, sizeof(local)) == SOCKET_ERROR) {
 		closesocket(sock);
 		WSACleanup();
-		m_nGETETBNThreaState = 0;
+		iGetETBNThreaState = 0;
 		return -1;
 	}
 	printf("bind ok ....\n");
@@ -1207,18 +1199,18 @@ int CTRDPServerDlg::getIP(CString &strIP)
 	if ((sockM = WSAJoinLeaf(sock, (SOCKADDR*)&remote, sizeof(remote), NULL, NULL, NULL, NULL, JL_BOTH)) == INVALID_SOCKET) {
 		closesocket(sock);
 		WSACleanup();
-		m_nGETETBNThreaState = 0;
+		iGetETBNThreaState = 0;
 		return -1;
 	}
 	printf("add ok ....\n");
 
 	/* 接收多播数据，当接收到的数据为第8，9字节收到100时退出。*/
-	m_nGETETBNThreaState = 1;
+	iGetETBNThreaState = 1;
 
 	while (1) {
-		if (m_nGETETBNThreaState == 2) {
+		if (iGetETBNThreaState == 2) {
 			break;
-		} else if (m_nGETETBNThreaState == 1) {
+		} else if (iGetETBNThreaState == 1) {
 			;
 		}
 
@@ -1227,7 +1219,7 @@ int CTRDPServerDlg::getIP(CString &strIP)
 			closesocket(sockM);
 			closesocket(sock);
 			WSACleanup();
-			m_nGETETBNThreaState=0;
+			iGetETBNThreaState=0;
 			printf("SOCKET_ERROR!");
 			return -1;
 		} else {
@@ -1239,7 +1231,6 @@ int CTRDPServerDlg::getIP(CString &strIP)
 				str0.Format("%02x-", recvbuf[i]);
 				str1 += str0;
 			}
-
 			printf("%s\n", str1);
 		}
 
@@ -1248,12 +1239,11 @@ int CTRDPServerDlg::getIP(CString &strIP)
 		if (ComId == 100) {
 			ret = recvbuf[92];
 			str_ret.Format("Current_ETBN %d", ret);
-			m_bIsCurrentETBNValid = 1;
-			m_nCurrentETBNNO      = ret;
+			bIsCurrentETBNValid = 1;
+			iCurrentETBNNO      = ret;
 			printf("%s\n", str_ret);
 
 			CString strIp = "10.0.0.1";    // 根据编组号，计算出IP地址
-
 		}
 		break;
 
@@ -1264,12 +1254,12 @@ int CTRDPServerDlg::getIP(CString &strIP)
 	closesocket(sock);
 	WSACleanup();
 
-	if (m_nGETETBNThreaState == 2) {
+	if (iGetETBNThreaState == 2) {
 		printf("检测ETBN工作因重复请求被停止，可重新发起请求！");
 	} else {
 		printf("已获取本地编组号，请选择要连接设备所在的编组号");
 	}
-	m_nGETETBNThreaState = 0;
+	iGetETBNThreaState = 0;
 
 	return 0;
 }
@@ -1687,4 +1677,167 @@ void CTRDPServerDlg::getConfig()
 	return;
 }
 
+#if 1
+//计算FTP的防火墙设置地址
+BOOL NOPSAVFTPIPSet(CString strsourceIP, BYTE bianzuNo, CString &tarstrIP)
+{
+	//修改:m_strNOPASVIP
+	BYTE dataS[4];
+	memset(dataS, 0, 4);
 
+	int dataCnt  = 0;
+	int dataLast = 0;
+	int BUFCNT   = 0;
+
+	CString str0 = "";
+	CString str1 = "";
+
+	for (UINT i = 0; i < strsourceIP.GetLength(); i++) {
+		if (strsourceIP.GetAt(i) == '.') {
+			CString str0 = "";
+			CString str1 = "";
+
+			for (dataCnt = dataLast; dataCnt < i; dataCnt++) {
+				str0.Format("%c", strsourceIP.GetAt(dataCnt));
+				str1 += str0;
+			}
+
+			dataS[BUFCNT] = (BYTE)atoi(str1);
+			BUFCNT++;
+			if (BUFCNT >= 3) { //计算公式
+				dataS[BUFCNT] = (BYTE)atoi(strsourceIP.Mid((i+1),(strsourceIP.GetLength()-i-1)));
+				break;
+			} else {
+				dataLast = i+1;
+			}
+		}
+	}
+
+	UINT32 devIpAddr = (dataS[0]<<24) | (dataS[1]<<16) | (dataS[2]<<8) | (dataS[3]);
+	UINT32 globalIpAddr = 0;
+	globalIpAddr        = ((devIpAddr & 0xFF00FFFF) | (bianzuNo << 14) | 0x00800000);
+
+	//计算目标的IP地址
+	CString str2 = "";
+	CString str3 = "";
+	str2.Format("IP From %d.%d.%d.%d", dataS[0], dataS[1], dataS[2], dataS[3]);
+	str3.Format("%d.%d.%d.%d", (globalIpAddr>>24)&0xFF, (globalIpAddr>>16)&0xFF, (globalIpAddr>>8)&0xFF, globalIpAddr&0xFF);
+
+	tarstrIP = str3;
+	str3 = "--->IP Global: ";
+	str3 += tarstrIP;
+	AfxMessageBox(str2 + str3);
+
+	return TRUE;
+}
+
+/**
+ * @brief    -- ExecCommand : 执行外部程序 , 压缩文件
+ * @param[ ] -- strCmdLine
+ * @return   -- 
+ */
+BOOL ExecCommand(CString strCmdLine)
+{
+	BOOL  bRet;
+	PROCESS_INFORMATION processInformation = {0};
+	STARTUPINFO startupInfo = {0};
+	startupInfo.cb = sizeof(startupInfo);
+
+	int nStrBuffer = strCmdLine.GetLength() + 50;
+	DWORD dwCode   = 0;
+
+	bRet = CreateProcess(NULL, strCmdLine.GetBuffer(nStrBuffer), NULL, NULL, FALSE, NORMAL_PRIORITY_CLASS | CREATE_NO_WINDOW, 
+			NULL, NULL, &startupInfo, &processInformation);
+	if (!bRet) {
+		printf(_T("Createprocess failed!"));
+		//AfxMessageBox(_T("Createprocess failed!"));
+		return FALSE;
+	}
+
+	WaitForSingleObject(processInformation.hProcess, INFINITE);
+
+	bRet = GetExitCodeProcess(processInformation.hProcess, &dwCode);
+	if (!bRet) {
+		printf(_T("Get exitcode failed!"));
+		CloseHandle(processInformation.hProcess);
+		CloseHandle(processInformation.hThread);
+		return FALSE;
+	}
+	CloseHandle( processInformation.hProcess );
+	CloseHandle( processInformation.hThread );
+
+	if (dwCode != 0) {
+		printf(_T("Invalid file execute failed!"));
+		return FALSE;
+	}
+
+	return TRUE;
+}
+
+/**
+ * @brief    -- DeleteTempDirectory ： 删除文件夹
+ * @param[ ] -- strPath
+ * @return   -- 
+ */
+BOOL DeleteTempDirectory(CString strPath)
+{
+	CFileFind finder;  
+	CString path;  
+	BOOL bFind(FALSE);
+
+	if (strPath.IsEmpty()) {
+		return FALSE;
+	}
+
+	path.Format(_T("%s/*.*"), strPath);  
+	bFind = finder.FindFile(path);  
+	while (bFind) {  
+		bFind = finder.FindNextFile();  
+		if (finder.IsDirectory() && !finder.IsDots()) {
+			DeleteTempDirectory(finder.GetFilePath());
+			RemoveDirectory(finder.GetFilePath());  
+		}  else {
+			DeleteFile(finder.GetFilePath());  
+		}  
+	} 
+
+	RemoveDirectory(strPath);
+	return TRUE;
+}
+
+/**
+ * @brief    -- compressExport : 压缩
+ */
+void compressExport()
+{
+	CString strFile("Rundata_2018_12_05.zip"), strPath, strTar, strRecordFile;
+	CString strCmd,  strDll,  strCmdLine;
+	CString strDirMnt, strDirNandflash, strDirDatabase;
+	TCHAR szPath[MAX_PATH];
+	memset(szPath, 0, MAX_PATH);
+	::GetCurrentDirectory(MAX_PATH, szPath);
+
+	printf("dir: %s\r\n", szPath);
+	CString strTmp("Rundata_2018_12_05");
+	strRecordFile.Format(_T("%s\\%s\\**"), szPath, strTmp);
+
+	strCmd.Format(_T("%s\\7z.exe"), szPath);
+	strDll.Format(_T("%s\\7z.dll"), szPath);
+
+	CFileFind finder;
+	if (!finder.FindFile(strCmd) || !finder.FindFile(strDll)) { //finder.FindFile();找到,返回1。
+	printf(_T("7z运行环境不存在，请确认已正确安装!"));
+		return;
+	}
+	if (!finder.FindFile() || !finder.FindFile(strRecordFile)) {
+		printf(_T("文件不存在!"));
+		return;
+	}
+	
+	strCmdLine.Format(_T("\"%s\" a -y -tgzip -sdel \"%s\" \"%s\""), strCmd, strFile, strRecordFile);
+	//strCmdLine.Format(_T("\"%s\" a -sdel -r \"%s\" \"%s\""), strCmd, strFile, strRecordFile);
+	if (!ExecCommand(strCmdLine))
+		return;
+	printf(_T("文件压缩成功!"));
+}
+#endif 

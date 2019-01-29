@@ -54,38 +54,38 @@ typedef CList<CString ,CString&> listFileInfo;   // 待同步文件信息
 
 typedef struct _ST_TRDP_DATA_INFO {
 	long     lPort;           // 端口号
-	unsigned portSize;        // 端口量数据大小
+	unsigned int portSize;        // 端口量数据大小
 	unsigned char data[1500]; // 接收数据
 } stTrdpDataInfo;        // TRDP数据信息
 
 typedef struct {
-	unsigned destNum;         // 目标索引  字节
+	unsigned int destNum;         // 目标索引  字节
 	int srcNum;               // 源数据索引  字节
-	unsigned bitNum;          // 字节中包含 位信息 的个数  <= 8;
+	unsigned char bitNum;          // 字节中包含 位信息 的个数  <= 8;
 
 	struct ST_POS_INFO {
 		CString  varType;    // 变量的类型 
-		unsigned bit;        // 字/位偏移
+		unsigned char bit;        // 字/位偏移
 	} srcPos[50];            // 源数据[字节] 包含位 ,至少要有一个 ;
 
 } stComInfo;                // 端口中字节的属性
 
 typedef struct {
 	int comId;               // 端口号
-	unsigned  portSize;      // 端口大小
-	unsigned  counter;       // 端口中 待处理数据内容的个数
+	int portSize;      // 端口大小
+	int counter;       // 端口中 待处理数据内容的个数
 	stComInfo varInfo[1500];  // 端口中 变量的个数   理论 < 1500  : 1001 -> 18000
 } stConfigInfo;               // 端口配置信息
 
 typedef struct {
 	CString  trdpip;
-	unsigned comid;           // 端口号
-	unsigned portsize;        // 端口大小，数组大小
-	unsigned cycle;           // 周期，尤其源端口发送数据需要该参数
-	unsigned direction;       // 数据方向，发送或接收，如二者都有写两次 ，PUBLISH = 0, SUBSCRIBE
-	unsigned byteofsetstart;
-	unsigned byteofsetend;
-	unsigned datalen;
+	int  comid;           // 端口号
+	unsigned int portsize;        // 端口大小，数组大小
+	int cycle;           // 周期，尤其源端口发送数据需要该参数
+	unsigned int direction;       // 数据方向，发送或接收，如二者都有写两次 ，PUBLISH = 0, SUBSCRIBE
+	int byteofsetstart;
+	int byteofsetend;
+	int datalen;
 }stTrdpPortPara;   // 端口配置数据信息
 
 
@@ -172,8 +172,8 @@ class CTRDPServerDlg : public CDialog
 			CListenSocket m_listenSocket;
 			UINT m_MAXID;
 			bool m_bStop;
-			unsigned int  m_ilen_comm;   
-			unsigned int  m_ilen_record; 
+			unsigned int m_ilen_comm;   
+			unsigned int m_ilen_record; 
 };
 
 /**

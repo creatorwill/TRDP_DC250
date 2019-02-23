@@ -15,8 +15,8 @@
 #include <afx.h> 
 
 //////////////////// trdp ////////////////////////////////
-#pragma comment( lib, "Win32TRDP_DLL.lib" ) 
-#pragma comment( lib, "version.lib")
+#pragma comment(lib, "Win32TRDP_DLL.lib" ) 
+#pragma comment(lib, "version.lib")
 
 #include "TRDP\os_def.h"
 #include "TRDP\mclcppclass.h"
@@ -79,6 +79,7 @@ typedef struct {
 
 typedef struct {
 	CString  trdpip;
+	// CHAR8 *  trdpip;
 	int  comid;           // 端口号
 	unsigned int portsize;        // 端口大小，数组大小
 	int cycle;           // 周期，尤其源端口发送数据需要该参数

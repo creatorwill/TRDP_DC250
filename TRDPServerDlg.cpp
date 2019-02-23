@@ -38,7 +38,7 @@ static char THIS_FILE[] = __FILE__;
 #endif
 
 
-#define RESERVED_MEMORY 160000
+#define RESERVED_MEMORY 660000  // 内存大小
 #define LENGTH_1701     1946
 #define LENGTH_1801     4666
 #define TRDPSENDTIMER   10
@@ -58,17 +58,18 @@ unsigned char DeviceID = 0;
 stTrdpDataInfo data_put_test[10];
 stTrdpDataInfo data_get_record[80]; 
 
-CString strFtpIP;           // ftp 服务器ip地址
+CString strFtpIP;               // ftp 服务器ip地址
+CString strLocalIP;             // local ip地址
 bool    isFileOpen1701 = FALSE; // 文件是否被打开
 bool    isFileOpen1801 = FALSE; // 文件是否被打开
-int     g_iCycleCnt = 0;    // trdp刷新时间计数，以10ms定时器为基准，适应其他周期的数据
+int     g_iCycleCnt = 0;        // trdp刷新时间计数，以10ms定时器为基准，适应其他周期的数据
 
 unsigned short g_iComTotalNum = 0; // 要记录变量的端口数量
 unsigned int  g_iTRDP_common_size; // 公共以太网 端口数量
 unsigned int  g_iTRDP_record_size; // 记录以太网 端口数量
 
-stTrdpPortPara trdpport_comm[10];    // 公共端口 配置
-stTrdpPortPara trdpport_record[120]; // 记录端口 配置
+stTrdpPortPara trdpport_comm[15];    // 公共端口 配置
+stTrdpPortPara trdpport_record[80]; // 记录端口 配置
 
 mapFileInfo  g_mapFileLocal;   // 存储本地文件信息：文件名, 文件大小
 mapFileInfo  g_mapFileServer;  // 存储ftp服务端文件信息：文件名，文件大小
@@ -97,10 +98,10 @@ TRDP_PROCESS_CONFIG_T process_Config;
 
 DG_U32          ret_val;
 TRDP_PD_INFO_T  pd_info[150];
-TRDP_PUB_T      pub_handle_comm[15];      // 发布 句柄
-TRDP_PUB_T      pub_handle_record[15];      // 发布 句柄
-TRDP_SUB_T      sub_handle_comm[180];    // 订阅 句柄
-TRDP_SUB_T      sub_handle_record[180];    // 订阅 句柄
+TRDP_PUB_T      pub_handle_comm[15];     // 发布 句柄
+TRDP_PUB_T      pub_handle_record[15];   // 发布 句柄
+TRDP_SUB_T      sub_handle_comm[80];    // 订阅 句柄
+TRDP_SUB_T      sub_handle_record[80];  // 订阅 句柄
 
 HANDLE  hWriteDRU1;  // 互斥量
 HANDLE  hWriteDRU2;  // 互斥量
@@ -156,40 +157,89 @@ static void md_callback (void *ref, TRDP_APP_SESSION_T apph, const TRDP_MD_INFO_
  */
 DG_S32 CTRDPServerDlg::trdp_pd_config()
 {
-	for (int i = 0; i< g_iTRDP_record_size; i++) {
+	for (int i = 0; i < g_iTRDP_record_size; i++) {
 		/* publish and subscribe telegrams */
 		if ( trdpport_record[i].direction == PUBLISH) {  // 发送 {发布} 
-			ret_val = tlp_publish(session_handle, &pub_handle_record[i], trdpport_record[i].comid, 0, 0, 0, vos_dottedIP(trdpport_record[i].trdpip),
-					trdpport_record[i].cycle * 1000, 0, TRDP_FLAGS_NONE, NULL, NULL, trdpport_record[i].portsize);
+			ret_val = tlp_publish(session_handle,
+					&pub_handle_record[i],
+					trdpport_record[i].comid,
+					0,
+					0,
+					0,
+					vos_dottedIP(trdpport_record[i].trdpip),
+					trdpport_record[i].cycle * 1000,
+					0,
+					TRDP_FLAGS_NONE,
+					NULL,
+					NULL,
+					trdpport_record[i].portsize);
+
+			printf("-PUBLISH---record----------------return: %d  pos:%d \n", ret_val, i);
 		} else if (trdpport_record[i].direction == SUBSCRIBE) { // 接收 {订阅} 
-			ret_val = tlp_subscribe(session_handle, &sub_handle_record[i], NULL, NULL, trdpport_record[i].comid, 0, 0, 0, 
-					vos_dottedIP(trdpport_record[i].trdpip), TRDP_FLAGS_NONE, trdpport_record[i].cycle * 1000, TRDP_TO_SET_TO_ZERO);
+			ret_val = tlp_subscribe(session_handle,
+					&sub_handle_record[i],
+					NULL,
+					NULL,
+					trdpport_record[i].comid,
+					0,
+					0,
+					0, 
+					vos_dottedIP(trdpport_record[i].trdpip),
+					TRDP_FLAGS_NONE,
+					trdpport_record[i].cycle * 1000,
+					TRDP_TO_SET_TO_ZERO);
+			printf("-subScribe---record----------------return: %d  pos:%d \n", ret_val, i);
 		}	
 	}
 
 	for (int j = 0; j < g_iTRDP_common_size; j++) {
 		/* publish and subscribe telegrams */
 		if (trdpport_comm[j].direction == PUBLISH) {  // 发送 {发布} 
-			ret_val = tlp_publish(session_handle, &pub_handle_comm[j], trdpport_comm[j].comid, 0, 0, 0, vos_dottedIP(trdpport_comm[j].trdpip), trdpport_comm[j].cycle * 1000, 0, TRDP_FLAGS_NONE, NULL, NULL, trdpport_comm[j].portsize);
+			ret_val = tlp_publish(session_handle, 
+					&pub_handle_comm[j],
+					trdpport_comm[j].comid,
+					0,
+					0,
+					0,
+					vos_dottedIP(trdpport_comm[j].trdpip),
+					trdpport_comm[j].cycle * 1000,
+					0,
+					TRDP_FLAGS_NONE,
+					NULL,
+					NULL,
+					trdpport_comm[j].portsize);
+			printf("-PUBLISH---comm----------------return: %d  pos:%d \n", ret_val, j);
 		} else if (trdpport_comm[j].direction == SUBSCRIBE) { // 接收 {订阅} 
-			ret_val = tlp_subscribe(session_handle, &sub_handle_comm[j], NULL, NULL,  trdpport_comm[j].comid, 0, 0, 0, 
-					vos_dottedIP(trdpport_comm[j].trdpip), TRDP_FLAGS_NONE, trdpport_comm[j].cycle * 1000, TRDP_TO_SET_TO_ZERO);
+			ret_val = tlp_subscribe(session_handle, 
+					&sub_handle_comm[j],
+					NULL,
+					NULL,
+					trdpport_comm[j].comid,
+					0,
+					0,
+					0, 
+					vos_dottedIP(trdpport_comm[j].trdpip),
+					TRDP_FLAGS_NONE,
+					trdpport_comm[j].cycle * 1000,
+					TRDP_TO_SET_TO_ZERO);
+			printf("-subscribe---comm----------------return: %d  pos:%d \n", ret_val, j);
 		}	
 	}
+
 #if 0
-	    ret_val = tlp_publish(session_handle,       /*  our application identifier             */
-            &pub_handle_comm[0],                     /*  our pulication identifier              */
-            12096,                              /*  comId to send                          */
-            0,                                  /*  etbTopoCnt = 0 for local consist only  */
-            0,                                  /*  opTopoCnt = 0 for non-directinal data  */
-            0,//vos_dottedIP("172.31.41.202"),  /*  default source IP                      */
-            vos_dottedIP("239.194.0.210"),      /*  where to send to                       */
-            500000,                          /*  cycleTime in us                        */
-            0,                                  /*  not redundant                          */
-            TRDP_FLAGS_NONE,                    /*  no flag                                */
-            NULL,                               /*  default qos and tll                    */
-            NULL,                               /*  sendData                               */
-            100);                              /*  data size */ 
+	ret_val = tlp_publish(session_handle,   /*  our application identifier             */
+			&pub_handle_comm[0],                /*  our pulication identifier              */
+			3110,                              /*  comId to send                          */
+			0,                                  /*  etbTopoCnt = 0 for local consist only  */
+			0,                                  /*  opTopoCnt = 0 for non-directinal data  */
+			0,//vos_dottedIP("172.31.41.202"),  /*  default source IP                      */
+			vos_dottedIP("239.255.21.10"),      /*  where to send to                       */
+			200000,                          /*  cycleTime in us                        */
+			0,                                  /*  not redundant                          */
+			TRDP_FLAGS_NONE,                    /*  no flag                                */
+			NULL,                               /*  default qos and tll                    */
+			NULL,                               /*  sendData                               */
+			100);                              /*  data size */ 
 #endif
 
 	return 0;
@@ -672,183 +722,185 @@ UINT ThreadTrdpDataProcess(LPVOID lpParam)
 			g_iCycleCnt = 0;
 		}
 
+		/* 公共端口 {1701、1702}:刷新周期100ms， {1801、1802、1301、1302}:刷新周期500ms */
+		for (int i=0; i < g_iTRDP_common_size; i++) {
+			if ((g_iCycleCnt % (trdpport_comm[i].cycle / 10)) == 0) {  // 计算刷新周期
+				// printf("g_iCycleCnt: %d, com:%d, cycle:%d \r\n", g_iCycleCnt, trdpport_comm[i].comid, trdpport_comm[i].cycle);
 
+				if (trdpport_comm[i].direction == PUBLISH) {					
 
-			/* 公共端口 {1701、1702}:刷新周期100ms， {1801、1802、1301、1302}:刷新周期500ms */
-			for (int i=0; i < g_iTRDP_common_size; i++) {
-				if ((g_iCycleCnt % (trdpport_comm[i].cycle / 10)) == 0) {  // 计算刷新周期
-					//	printf("g_iCycleCnt: %d, com:%d, cycle:%d \r\n", g_iCycleCnt, trdpport_comm[i].comid, trdpport_comm[i].cycle);
+					// printf("direction %d, comid %d portsize %d cycle %d \r\n", trdpport_comm[i].direction, 
+					//	 	 trdpport_comm[i].comid, trdpport_comm[i].portsize, trdpport_comm[i].cycle);
 
-					if (trdpport_comm[i].direction == PUBLISH) {					
+					st_data_info dataPut;
+					m_shareMemory.ReadMvbDatatoTrdp(&dataPut);   // 读取共享内存中的mvb数据
 
-						 // printf("direction %d, comid %d portsize %d cycle %d \r\n", trdpport_comm[i].direction, 
-						//		 trdpport_comm[i].comid, trdpport_comm[i].portsize, trdpport_comm[i].cycle);
-
-						st_data_info dataPut;
-						m_shareMemory.ReadMvbDatatoTrdp(&dataPut);   // 读取共享内存中的mvb数据
-
-						iCounterLife++;
-						if (iCounterLife >= 255) {
-							iCounterLife = 0;
-						}
-
-						/* 取消前两个字节发送生命信号 */
-						// dataPut.data[0] = iCounterLife / 256;
-						// dataPut.data[11] = iCounterLife % 256;
-						/* 发送生命信号 */
-						// dataPut.data[11] = iCounterLife;
-						int retTmp = -99;
-
-						memset(putData[0].data, 0xCC, 200);
-						putData[0].data[9] =  0x00;
-						putData[0].data[10] =  0x01;
-						putData[0].data[11] =  iCounterLife;
-						try {
-							// ret_val = tlp_put(session_handle, pub_handle_comm[i], (DG_U8*)&dataPut.data, trdpport_comm[i].portsize);  
-							printf("putdata value:%x\n", putData[0].data[11]);
-							retTmp = tlp_put(session_handle, pub_handle_comm[i], (DG_U8*)&putData[0], trdpport_comm[i].portsize);  
-
-						} catch (...) {
-							printf("catch---exception --\n");
-						}
-
-						printf("Put comID:%d, return %d \r\n", trdpport_comm[i].comid, retTmp);
-						tlc_process(session_handle, NULL, NULL);
-
-					} else if (trdpport_comm[i].direction == SUBSCRIBE) {
-
-						stTrdpDataInfo  dataGet;
-						dataGet.lPort = trdpport_comm[i].comid;
-						dataGet.portSize = trdpport_comm[i].portsize;
-						ret_val = tlp_get(session_handle, sub_handle_comm[i], &pd_info[i], (DG_U8*)&dataGet.data, &trdpport_comm[i].portsize);
-						// printf("Get %d,return %d \r\n", trdpport_comm[i].comid, ret_val);
-
-						if (TRDP_NO_ERR == ret_val) {   // 收发数据无错误  -> 处理数据
-							/* 1，获取TRDP数据 */
-							/* cData1701 : (head){22} + (data){960 + 960} +  (fcs + end){1 + 3}  = 1946 (LENGTH_1701) */
-							if (dataGet.lPort == 1701) {  // 1701 数据长度为 1000
-								// unCounter dataLength;
-								// memcpy(dataLength.cCounter, dataGet.data +24, 4); // 获取报文 应用内容的实际长度
-								memcpy(cData1701 + 22, dataGet.data + 40, 960);  // trdp 包头：40个字节
-							}
-							if (dataGet.lPort == 1702) {  // 1702 数据长度为 1000  
-								memcpy(cData1701+ 960 + 22, dataGet.data + 40, 960);
-							}   
-
-							/* cData1801 : (head){22} + (data){960 + 960 + 1360 + 1360} +  (fcs + end){1 + 3}  = 4666 (LENGTH_1801) */
-							if (dataGet.lPort == 1801) { // 1801 数据长度为 1000  
-								memcpy(cData1801 + 22, dataGet.data + 40, 960);
-							}
-							if (dataGet.lPort == 1802) { // 1802 数据长度为 1000  
-								memcpy(cData1801 + 960 + 22, dataGet.data + 40, 960);
-							}
-							if (dataGet.lPort == 1301) { // 1301 数据长度为 1400  
-								memcpy(cData1801 + 960 + 960 + 22, dataGet.data + 40, 1360);
-							}
-							if (dataGet.lPort == 1302) {// 1302 数据长度为 1400  
-								memcpy(cData1801 + 1360 + 960 + 960 + 22, dataGet.data + 40, 1360);
-							}
-
-							/* 2，对 1701/1801 数据进行处理 。头、尾、校验 */
-							/* 对数据进行处理，提取数据区，重新组帧 */
-							/* 组帧：0xAA 0xAB [4]{carNumber} [2]{dataLength} [1]{version} [4]{frameNumber} [1]{dataType 0x42} [6]{utc时间 ms} [n]{data} [1]{FCS} 0xBA 0xBB */
-
-							if ((dataGet.lPort == 1701) || (dataGet.lPort == 1702)) {  // 1701 
-								unCounter frameNumber1701;
-
-								frameNumber1701.iCounter = 0;  // 计数 初始化
-								frameNumber1701.iCounter++;
-								if (frameNumber1701.iCounter >= 0xffffffff) {
-									frameNumber1701.iCounter = 0;
-								}
-
-								cData1701[16] = 0;
-								cData1701[17] = frameNumber1701.cCounter[0];
-								cData1701[18] = frameNumber1701.cCounter[1];
-								cData1701[19] = frameNumber1701.cCounter[2];
-								cData1701[20] = frameNumber1701.cCounter[3];
-								cData1701[21] = 0x41;
-
-								BYTE  FCS = 0;
-								for (unsigned short iall = 3; iall < LENGTH_1701 - 4; iall++) {		
-									FCS ^= cData1701[iall];
-								}
-								cData1701[LENGTH_1701 - 4] = FCS;
-
-								memcpy(dataComm.data, cData1701, LENGTH_1701);
-							}
-
-							if ((dataGet.lPort == 1801) || (dataGet.lPort == 1802) || (dataGet.lPort == 1301) || (dataGet.lPort == 1302)) {  // 1801 
-								unCounter frameNumber1801;
-
-								frameNumber1801.iCounter = 0;  // 计数 初始化
-								frameNumber1801.iCounter++;
-								if (frameNumber1801.iCounter >= 0xffffffff) {
-									frameNumber1801.iCounter = 0;
-								}
-
-								for (UINT i = 0; i < 13; i++) {
-									cData1801[i] = HeadPacket[i];
-								}
-
-								cData1801[13] = (LENGTH_1801 - 26) % 256;
-								cData1801[14] = (LENGTH_1801 - 26) / 256;
-								cData1801[15] = HeadPacket[15];
-								cData1801[16] = 0;
-								cData1801[17] = frameNumber1801.cCounter[0];
-								cData1801[18] = frameNumber1801.cCounter[1];
-								cData1801[19] = frameNumber1801.cCounter[2];
-								cData1801[20] = frameNumber1801.cCounter[3];
-								cData1801[21] = 0x41;
-
-								BYTE  FCS = 0;
-								for (unsigned short iall = 3; iall < LENGTH_1801 - 4; iall++) {		
-									FCS ^= cData1801[iall];
-								}
-								cData1801[LENGTH_1801 - 4] = FCS;
-
-								memcpy(dataComm.data + 10000 , cData1801, LENGTH_1801);
-							}
-
-							/* 3，写入共享内存 */
-							m_shareMemory.WriteTrdpDatatoMvb(&dataComm, 0);
-
-						}
+					iCounterLife++;
+					if (iCounterLife >= 65535) {
+						iCounterLife = 0;
 					}
-				}
-			}
 
-			/* dru过程数据 */
-			for (int j=0; j <  g_iTRDP_record_size; j++) {
-				if ((g_iCycleCnt % (trdpport_record[j].cycle / 10)) == 0) {  // 计算刷新周期
-					//printf("g_iCycleCnt: %d, com:%d, cycle:%d \r\n", g_iCycleCnt, trdpport_record[j].comid, trdpport_record[j].cycle);
+					int retTmp = -99;
 
-					stTrdpDataInfo  dataGetRecord;
-					dataGetRecord.lPort = trdpport_record[j].comid;
-					dataGetRecord.portSize =  trdpport_record[j].portsize;
+					memset(putData[0].data, 0x55, 200);
 
-					ret_val = tlp_get(session_handle, sub_handle_record[j], &pd_info[j], (DG_U8*)&dataGetRecord.data, &trdpport_record[j].portsize);
+					/* 取消前两个字节发送生命信号 */
+					putData[0].data[0] = iCounterLife / 256;
+					putData[0].data[1] = iCounterLife % 256;
+					putData[0].data[2] = 0x99;
+					putData[0].data[3] = 0x33;
+					putData[0].data[4] = 0x88;
 
-					//	printf("Get %d,return %d \r\n",trdpport_record[j].comid, ret_val);
+					putData[0].data[28] = 0x55;
+					putData[0].data[29] = 0x88;
+					putData[0].data[30] = 0x00;
+					putData[0].data[31] = 0x01;
+					try {
+						printf("putdata value:%x,   portsize:%d,   pub_handle_addr:%p\n", putData[0].data[1], trdpport_comm[i].portsize, &pub_handle_comm[i]);
+
+						retTmp = tlp_put(session_handle, pub_handle_comm[i], (DG_U8*)&putData[0].data, trdpport_comm[i].portsize);  
+
+					} catch (...) {
+						printf("catch---exception --\n");
+					}
+
+					printf("Put comID:%d, return %d  IP_addr: %s\r\n", trdpport_comm[i].comid, retTmp, trdpport_comm[i].trdpip);
+					tlc_process(session_handle, NULL, NULL);
+
+				} else if (trdpport_comm[i].direction == SUBSCRIBE) {
+
+					stTrdpDataInfo  dataGet;
+					dataGet.lPort = trdpport_comm[i].comid;
+					dataGet.portSize = trdpport_comm[i].portsize;
+					ret_val = tlp_get(session_handle, sub_handle_comm[i], &pd_info[i], (DG_U8*)&dataGet.data, &trdpport_comm[i].portsize);
+					// printf("Get %d,return %d \r\n", trdpport_comm[i].comid, ret_val);
 
 					if (TRDP_NO_ERR == ret_val) {   // 收发数据无错误  -> 处理数据
-						for (int ii = 0; ii < g_iComTotalNum; ii++) {
-							if (dataGetRecord.lPort == stCfgInfo[ii].comId) {
-								for (int iter = 0; iter < stCfgInfo[ii].counter; ++iter) {
-									dataRecord.data[stCfgInfo[ii].varInfo[iter].destNum] =
-										dataGetRecord.data[stCfgInfo[ii].varInfo[iter].srcNum];  // 按配置文件要求，把相应的TRDP字节存储到mvbBuf
-								}
-							}
+						/* 1，获取TRDP数据 */
+						/* cData1701 : (head){22} + (data){960 + 960} +  (fcs + end){1 + 3}  = 1946 (LENGTH_1701) */
+						if (dataGet.lPort == 1701) {  // 1701 数据长度为 1000
+							// unCounter dataLength;
+							// memcpy(dataLength.cCounter, dataGet.data +24, 4); // 获取报文 应用内容的实际长度
+							memcpy(cData1701 + 22, dataGet.data + 40, 960);  // trdp 包头：40个字节
+						}
+						if (dataGet.lPort == 1702) {  // 1702 数据长度为 1000  
+							memcpy(cData1701+ 960 + 22, dataGet.data + 40, 960);
+						}   
+
+						/* cData1801 : (head){22} + (data){960 + 960 + 1360 + 1360} +  (fcs + end){1 + 3}  = 4666 (LENGTH_1801) */
+						if (dataGet.lPort == 1801) { // 1801 数据长度为 1000  
+							memcpy(cData1801 + 22, dataGet.data + 40, 960);
+						}
+						if (dataGet.lPort == 1802) { // 1802 数据长度为 1000  
+							memcpy(cData1801 + 960 + 22, dataGet.data + 40, 960);
+						}
+						if (dataGet.lPort == 1301) { // 1301 数据长度为 1400  
+							memcpy(cData1801 + 960 + 960 + 22, dataGet.data + 40, 1360);
+						}
+						if (dataGet.lPort == 1302) { // 1302 数据长度为 1400  
+							memcpy(cData1801 + 1360 + 960 + 960 + 22, dataGet.data + 40, 1360);
 						}
 
-						/*写入共享内存 */
-						m_shareMemory.WriteTrdpDatatoMvb(&dataRecord, 1);
+						/* 2，对 1701/1801 数据进行处理 。头、尾、校验 */
+						/* 对数据进行处理，提取数据区，重新组帧 */
+						/* 组帧：0xAA 0xAB [4]{carNumber} [2]{dataLength} [1]{version} [4]{frameNumber} [1]{dataType 0x42} [6]{utc时间 ms} [n]{data} [1]{FCS} 0xBA 0xBB */
 
-						tlc_process(session_handle, NULL, NULL);
+						if ((dataGet.lPort == 1701) || (dataGet.lPort == 1702)) {  // 1701 
+							unCounter frameNumber1701;
+
+							frameNumber1701.iCounter = 0;  // 计数 初始化
+							frameNumber1701.iCounter++;
+							if (frameNumber1701.iCounter >= 0xffffffff) {
+								frameNumber1701.iCounter = 0;
+							}
+
+							cData1701[16] = 0;
+							cData1701[17] = frameNumber1701.cCounter[0];
+							cData1701[18] = frameNumber1701.cCounter[1];
+							cData1701[19] = frameNumber1701.cCounter[2];
+							cData1701[20] = frameNumber1701.cCounter[3];
+							cData1701[21] = 0x41;
+
+							BYTE  FCS = 0;
+							for (unsigned short iall = 3; iall < LENGTH_1701 - 4; iall++) {		
+								FCS ^= cData1701[iall];
+							}
+							cData1701[LENGTH_1701 - 4] = FCS;
+
+							memcpy(dataComm.data, cData1701, LENGTH_1701);
+						}
+
+						if ((dataGet.lPort == 1801) || (dataGet.lPort == 1802) || (dataGet.lPort == 1301) || (dataGet.lPort == 1302)) {  // 1801 
+							unCounter frameNumber1801;
+
+							frameNumber1801.iCounter = 0;  // 计数 初始化
+							frameNumber1801.iCounter++;
+							if (frameNumber1801.iCounter >= 0xffffffff) {
+								frameNumber1801.iCounter = 0;
+							}
+
+							for (UINT i = 0; i < 13; i++) {
+								cData1801[i] = HeadPacket[i];
+							}
+
+							cData1801[13] = (LENGTH_1801 - 26) % 256;
+							cData1801[14] = (LENGTH_1801 - 26) / 256;
+							cData1801[15] = HeadPacket[15];
+							cData1801[16] = 0;
+							cData1801[17] = frameNumber1801.cCounter[0];
+							cData1801[18] = frameNumber1801.cCounter[1];
+							cData1801[19] = frameNumber1801.cCounter[2];
+							cData1801[20] = frameNumber1801.cCounter[3];
+							cData1801[21] = 0x41;
+
+							BYTE  FCS = 0;
+							for (unsigned short iall = 3; iall < LENGTH_1801 - 4; iall++) {		
+								FCS ^= cData1801[iall];
+							}
+							cData1801[LENGTH_1801 - 4] = FCS;
+
+							memcpy(dataComm.data + 10000 , cData1801, LENGTH_1801);
+						}
+
+						/* 3，写入共享内存 */
+						m_shareMemory.WriteTrdpDatatoMvb(&dataComm, 0);
 					}
+
+					tlc_process(session_handle, NULL, NULL);
 				}
 			}
+		}
 
+		/* dru过程数据 */
+		for (int j=0; j <  g_iTRDP_record_size; j++) {
+			if ((g_iCycleCnt % (trdpport_record[j].cycle / 10)) == 0) {  // 计算刷新周期
+				//printf("g_iCycleCnt: %d, com:%d, cycle:%d \r\n", g_iCycleCnt, trdpport_record[j].comid, trdpport_record[j].cycle);
+
+				stTrdpDataInfo  dataGetRecord;
+				dataGetRecord.lPort = trdpport_record[j].comid;
+				dataGetRecord.portSize =  trdpport_record[j].portsize;
+
+				ret_val = tlp_get(session_handle, sub_handle_record[j], &pd_info[j], (DG_U8*)&dataGetRecord.data, &trdpport_record[j].portsize);
+
+				//	printf("Get %d,return %d \r\n",trdpport_record[j].comid, ret_val);
+
+				if (TRDP_NO_ERR == ret_val) {   // 收发数据无错误  -> 处理数据
+					for (int ii = 0; ii < g_iComTotalNum; ii++) {
+						if (dataGetRecord.lPort == stCfgInfo[ii].comId) {
+							for (int iter = 0; iter < stCfgInfo[ii].counter; ++iter) {
+								dataRecord.data[stCfgInfo[ii].varInfo[iter].destNum] =
+									dataGetRecord.data[stCfgInfo[ii].varInfo[iter].srcNum];  // 按配置文件要求，把相应的TRDP字节存储到mvbBuf
+							}
+						}
+					}
+
+					/*写入共享内存 */
+					m_shareMemory.WriteTrdpDatatoMvb(&dataRecord, 1);
+
+				}
+				tlc_process(session_handle, NULL, NULL);
+			}
+		}
 
 		g_iCycleCnt++;   // 频率：10ms
 		Sleep(10);	     // 延时10毫秒
@@ -867,25 +919,15 @@ void CTRDPServerDlg::getPort()
 	CString strFileName;
 	CString path;
 
-	LPTSTR path1 = new char[500]; 
-	strcpy(path1, "C:\\config\\TRDP端口配置.xls");
-
-	path = path1;
-	path = "C:\\config\\TRDP端口配置.xls";
+	path = "C:\\config\\TRDP_Config.xls";
+	// path = "C:\\Documents and Settings\\Administrator\\桌面\\CRHWTDBZ\\WTD_ETH\\TRDP_Config.xls";
 	path.Replace("\\", "\\\\");
-
-	CSpreadSheet xls_comm(path, "公共以太网记录"); //sheet1  公共端口数据
-	CSpreadSheet xls_record(path, "ECN_TCN记录端口协议"); //sheet2 记录端口数据
 
 	CStringArray Rows;  // 定义工作表的行和列
 	CStringArray Column; 
 	int index = 0;
 
-	if (index > xls_record.GetTotalRows())  {
-		index = 1; //行从1开始，列从0开始
-	}
-
-	CString strtitle = "";
+	CSpreadSheet xls_record(path, "ECN_TCN"); //sheet2 记录端口数据
 
 	unsigned address;
 	int t[4];
@@ -893,7 +935,6 @@ void CTRDPServerDlg::getPort()
 
 	sscanf(str, "%x", t);
 	address = t[0];
-	strtitle = strtitle;
 
 	m_ilen_record = xls_record.GetTotalRows();
 	g_iTRDP_record_size = m_ilen_record - 1;   // 记录以太网 端口数量
@@ -903,7 +944,8 @@ void CTRDPServerDlg::getPort()
 		/* 解析每一行的内容 */
 		str = Rows.GetAt(0); 
 		if (str != "") {
-			trdpport_record[index-2].trdpip = Rows.GetAt(0); //端口地址
+			// trdpport_record[index-2].trdpip = str.GetBuffer(str.GetLength()); //端口地址
+			trdpport_record[index-2].trdpip = str;
 		} else {
 			//将故障信息写入日志文件
 		}
@@ -962,15 +1004,16 @@ void CTRDPServerDlg::getPort()
 			CString strTmp = Rows.GetAt(7);   // 发布 与 订阅
 
 			if (strTmp.CompareNoCase("subscribe") == 0) {  // 不区分大小写 比较字符
-				trdpport_comm[index-2].direction =  SUBSCRIBE;
+				trdpport_record[index-2].direction =  SUBSCRIBE;
 			} else if (strTmp.CompareNoCase("publish") == 0) {  // 不区分大小写 比较字符
-				trdpport_comm[index-2].direction =  PUBLISH;
+				trdpport_record[index-2].direction =  PUBLISH;
 			} 
 		} else {
 			//将故障信息写入日志文件
 		}
 	}
 
+	CSpreadSheet xls_comm(path, "Comm");      //sheet1  公共端口数据
 	m_ilen_comm = xls_comm.GetTotalRows();
 	g_iTRDP_common_size = m_ilen_comm - 1;   // 公共以太网 端口数量
 	for (index=2; index <= m_ilen_comm; index++) {  
@@ -979,7 +1022,8 @@ void CTRDPServerDlg::getPort()
 		/* 解析每一行的内容 */
 		str = Rows.GetAt(0); 
 		if (str != "") {
-			trdpport_comm[index-2].trdpip = Rows.GetAt(0); //端口地址
+			// trdpport_comm[index-2].trdpip = str.GetBuffer(str.GetLength()); //端口地址
+			trdpport_comm[index-2].trdpip = str;
 		} else {
 			//将故障信息写入日志文件
 		}
@@ -1046,6 +1090,19 @@ void CTRDPServerDlg::getPort()
 		}
 	}
 
+    CSpreadSheet xls_local_ip(path, "Local"); 
+    xls_local_ip.ReadRow(Rows, 2); 
+    /* 解析行的内容 */
+    str = Rows.GetAt(0); 
+    if (str != "") {
+        strLocalIP = str;
+        printf("Get local ip: %s \n", strLocalIP);
+    } else {
+        strLocalIP = "10.0.1.210";
+        printf("Get default local ip: %s \n", strLocalIP);
+        //将故障信息写入日志文件
+    }
+
 	return;
 }
 
@@ -1098,8 +1155,7 @@ void CTRDPServerDlg::OnStartTRDP()
 
 	if (TRDP_NO_ERR == ret_val)
 		ret_val = tlc_openSession(&session_handle,
-//				vos_dottedIP("10.1.8.215"),       // 本机ip地址
-				vos_dottedIP("127.0.0.2"),       // 本机ip地址
+				vos_dottedIP(strLocalIP),       // 本机ip地址
 				0,
 				NULL,
 				&pd_Config,

@@ -45,8 +45,13 @@ UINT Csharememoryclient:: initsharememory()
 		return 1;
 	}
 
+	for (int i = 0; i < 6; i++) {
+		memory_trdp_mvb->isValid[i] = false;
+	}
+
 	if (dwMapErrTrdp == ERROR_ALREADY_EXISTS) { // 如果该共享内存已经存在
 		memory_trdp_mvb->bFlag = true;
+
 	} else {
 		memory_trdp_mvb->bFlag = false;
 	}
@@ -71,6 +76,7 @@ Csharememoryclient:: WriteTrdpDatatoMvb(st_data_info *buf, unsigned index)
 	try {
 		memcpy(memory_trdp_mvb->memory_data[index].strType, buf->strType, strlen(buf->strType));
 		memcpy(memory_trdp_mvb->memory_data[index].data, buf->data, 20000);
+		memory_trdp_mvb->isValid[index] = true;
 	} catch (...) {
 		printf("Write shared memory failed");
 		// AfxMessageBox("Write shared memory failed");
@@ -86,12 +92,14 @@ Csharememoryclient::ReadMvbDatatoTrdp(st_data_info *buf, unsigned index)
 {
 	try {
 		memcpy(buf->strType, memory_trdp_mvb->memory_data[index].strType, strlen(memory_trdp_mvb->memory_data[index].strType));
+		// printf("Read shared memory[%d] vald: %d \r\n" , index, memory_trdp_mvb->isValid[index]);
+
 
 		for (int j = 0; j < 20000; j++) {
 			buf->data[j] = memory_trdp_mvb->memory_data[index].data[j];	
 		}
 	} catch (...) {
-		printf("Write shared memory failed");
+		printf("Read shared memory failed");
 		// AfxMessageBox("Read shared memory failed");
 	}
 }

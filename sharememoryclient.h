@@ -32,6 +32,7 @@ typedef struct _ST_DATA_INFO {
  */
 typedef struct _ST_SHARED_MEMORY{
 	BOOL bFlag;                  // 是否已存在共享内存,
+	BOOL isValid[6];                  // 是否已存在共享内存,
 	st_data_info memory_data[6]; // 0~4:存放接收的TRDP数据 , 5: 存放 mvb数据
 } st_shared_memory;
 

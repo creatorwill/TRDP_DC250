@@ -54,53 +54,57 @@ typedef CList<CString ,CString&> listFileInfo;   // 待同步文件信息
 
 typedef struct _ST_TRDP_DATA_INFO {
 	long     lPort;           // 端口号
-	unsigned int portSize;        // 端口量数据大小
+	unsigned int portSize;    // 端口量数据大小
 	unsigned char data[1500]; // 接收数据
-} stTrdpDataInfo;        // TRDP数据信息
+} stTrdpDataInfo;             // TRDP数据信息
 
 typedef struct {
-	unsigned int destNum;         // 目标索引  字节
+	unsigned int destNum;     // 目标索引  字节
 	int srcNum;               // 源数据索引  字节
-	unsigned char bitNum;          // 字节中包含 位信息 的个数  <= 8;
+	unsigned char bitNum;     // 字节中包含 位信息 的个数  <= 8;
 
 	struct ST_POS_INFO {
 		CString  varType;    // 变量的类型 
-		unsigned char bit;        // 字/位偏移
-	} srcPos[50];            // 源数据[字节] 包含位 ,至少要有一个 ;
+		unsigned char bit;   // 字/位偏移
+	} srcPos[15];            // 源数据[字节] 包含位 ,至少要有一个 ;
 
-} stComInfo;                // 端口中字节的属性
+} stComInfo;                 // 端口中字节的属性
 
 typedef struct {
-	int comId;               // 端口号
-	int portSize;      // 端口大小
-	int counter;       // 端口中 待处理数据内容的个数
-	stComInfo varInfo[1500];  // 端口中 变量的个数   理论 < 1500  : 1001 -> 18000
+	int comId;                // 端口号
+	int portSize;             // 端口大小
+	int counter;              // 端口中 待处理数据内容的个数
+	stComInfo varInfo[5000];  // 端口中 变量的个数   理论 < 1500  : 1001 -> 18000 由于1001端口数量过多，该值设为5000
 } stConfigInfo;               // 端口配置信息
 
 typedef struct {
 	CString  trdpip;
 	// CHAR8 *  trdpip;
-	int  comid;           // 端口号
-	unsigned int portsize;        // 端口大小，数组大小
-	int cycle;           // 周期，尤其源端口发送数据需要该参数
-	unsigned int direction;       // 数据方向，发送或接收，如二者都有写两次 ，PUBLISH = 0, SUBSCRIBE
+	int  comid;               // 端口号
+	unsigned int portsize;    // 端口大小，数组大小
+	int cycle;                // 周期，尤其源端口发送数据需要该参数
+	unsigned int direction;   // 数据方向，发送或接收，如二者都有写两次 ，PUBLISH = 0, SUBSCRIBE
 	int byteofsetstart;
 	int byteofsetend;
 	int datalen;
-}stTrdpPortPara;   // 端口配置数据信息
+} stTrdpPortPara;   // 端口配置数据信息
 
+/* 字节偏移：位偏移 */
+typedef struct ST_TYPE {
+    int iWordOffset;
+    int iBitOffset;
+} stWordBit;
 
+/* trdp数据需要存储的目标地址：trdp数据的字、位偏移 */
+typedef struct ST_WORD_INFO{
+    int iDestNum;
+    stWordBit stOffset;
+} stVarInfo;
+
+typedef CMap<int, int&, CString, LPCTSTR> mapFaultInfo;             // key:目标变量字节偏移值， value: 变量名字
+typedef CMap<CString, LPCTSTR, stWordBit, stWordBit&> mapVarInfo;   // key:变量名字, value: 目标变量字节偏移与位偏移 
+   
 // CTRDPServerDlg dialog
-struct SServerMsg {
-	UINT  m_msgType;
-	char  m_msgBuff[4096];
-	DWORD m_msglen;
-};
-
-struct SFile {
-	CString m_filename;
-	DWORD   m_filelen;
-};
 
 class CTRDPServerDlg : public CDialog
 {
@@ -112,7 +116,6 @@ class CTRDPServerDlg : public CDialog
 		bool ReflashList();
 
 		void Recurse(LPCTSTR pstr);
-		int flag,flag1,flag2;
 		CString recvname;
 		DWORD recvlen;
 
@@ -120,8 +123,11 @@ class CTRDPServerDlg : public CDialog
 		DG_S32 trdp_pd_config();
 
 		void getPort();
+		void getFaultConfig(mapFaultInfo &mapInfo, CString strFileName, int iType);
+		void getFaultConfig(mapVarInfo &mapInfo, CString strFileName);
+        int getVarInfo(stVarInfo* stInfo, mapFaultInfo &fautInfo, mapVarInfo &varInfo);
 		void getConfig();           // 获取TRDP变量 与MVB变量 的映射关系 配置
-		int getIP(CString &strIP); // 获取对面列车编组号 ，计算出ip地址。
+		unsigned char getETBN();  // 获取对面列车编组号;
 
 
 		// Dialog Data
@@ -132,6 +138,10 @@ class CTRDPServerDlg : public CDialog
 		CListCtrl m_filelist;
 		UINT      m_iport;
 		CString	  m_TRDPReceive;
+
+		//UINT m_nTestType;
+		//UINT m_nTestPlace;
+		//UINT m_nTestValue;
 		//}}AFX_DATA
 
 		// ClassWizard generated virtual function overrides
@@ -175,6 +185,15 @@ class CTRDPServerDlg : public CDialog
 			bool m_bStop;
 			unsigned int m_ilen_comm;   
 			unsigned int m_ilen_record; 
+            mapFaultInfo m_mapFault1Info;  // 一二级故障 trdp 目标偏移，与 变量名
+			mapFaultInfo m_mapFault3Info;   // 三级故障 trdp 目标偏移，与 变量名
+			mapVarInfo m_mapVarInfo1;   // 1 2 级故障
+			mapVarInfo m_mapVarInfo3;   // 3 级故障
+
+            stVarInfo m_stVarFault1[5000];    // trdp 目标偏移以及 端口字节偏移、位偏移  1 2 级故障
+            stVarInfo m_stVarFault3[5000];    // trdp 目标偏移以及 端口字节偏移、位偏移　３　级故障
+			int m_iVarFault1Length;
+			int m_iVarFault3Length;
 };
 
 /**

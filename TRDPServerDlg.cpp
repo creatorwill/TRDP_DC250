@@ -9,8 +9,10 @@
 #include "CSpreadSheet.h"
 #include "winsock.h"
 #include "stdlib.h"
+#include "shlwapi.h"
 
 #pragma comment(lib,"wsock32.lib")
+#pragma comment(lib,"shlwapi.lib")
 #pragma comment(lib,"ws2_32.lib")
 
 /* 调试窗口 */
@@ -37,11 +39,17 @@ void InitConsole()
 static char THIS_FILE[] = __FILE__;
 #endif
 
+#define GET_BIT(x, y)   ((x) >> (y)&1)  // 获取 字节 x 的 y位的值。
 
-#define RESERVED_MEMORY 660000  // 内存大小
-#define LENGTH_1701     1946
-#define LENGTH_1801     4666
-#define TRDPSENDTIMER   10
+
+#define RESERVED_MEMORY  660000  // 内存大小
+#define LENGTH_1701      3866 
+#define LENGTH_1801      9306
+#define TRDPSENDTIMER    10
+#define TRDP_PORT_NUMBER 90
+#define FAULT_MAX_SIZE   3500   // 故障缓存大小
+#define DRUSTOREDIR2    "D:\\WTD_INFO\\以太网数据"
+// #define REALDATASTOREDIR  "D:\\WTD_INFO\\实时数据"
 
 enum TRDPPortEnum{
 	PUBLISH = 0,
@@ -50,16 +58,34 @@ enum TRDPPortEnum{
 
 static Csharememoryclient m_shareMemory;  // 共享内存
 
-unsigned char cData1701[2300] = {0}; // 1701 1702公共端口，记录内容，记录周期100ms，数据刷新应小于100ms，每小时整点生成一个文件，文件后缀为edf ，数据类型为0x42
-unsigned char cData1801[5000] = {0}; // 1801 1802 1301 1302 记录内容，记录周期1s，数据刷新周期500ms，每小时整点生成一个文件，文件后缀为eds，数据类型为0x43。
-unsigned char DeviceID = 0;
+unsigned char cData1701[8000] = {0}; // 1701 1702公共端口，记录内容，记录周期100ms，数据刷新应小于100ms，每小时整点生成一个文件，文件后缀为edf ，数据类型为0x42
+unsigned char cData1801[10000] = {0}; // 1801 1802 1301 1302 记录内容，记录周期1s，数据刷新周期500ms，每小时整点生成一个文件，文件后缀为eds，数据类型为0x43。
+unsigned char cDataFault1C1[2000] = {0}; // 一二级故障数据。
+unsigned char cDataFault1C2[2000] = {0}; // 一二级故障数据。
+unsigned char cDataFault1C3[2000] = {0}; // 一二级故障数据。
+unsigned char cDataFault1C4[2000] = {0}; // 一二级故障数据。
+unsigned char cDataFault3C1[2000] = {0}; // 三级故障数据。
+unsigned char cDataFault3C2[2000] = {0}; // 三级故障数据。
+unsigned char cDataFault3C3[2000] = {0}; // 三级故障数据。
+unsigned char cDataFault3C4[2000] = {0}; // 三级故障数据。
+ULONG DeviceID = 0;
 
 /* 存放 TRDP数据。 */
-stTrdpDataInfo data_put_test[10];
-stTrdpDataInfo data_get_record[80]; 
+// stTrdpDataInfo data_put_test[10];
+// stTrdpDataInfo data_get_record[80]; 
 
-CString strFtpIP;               // ftp 服务器ip地址
-CString strLocalIP;             // local ip地址
+CString strFtpIP;   // ftp 服务器ip地址
+CString strLocalIP; // local ip地址
+
+int g_iCtlType       = 0; // 控车模式   ：1：trdp控车、 0： mvb控车
+int g_iCtlModeOffset = 0; // 控车模式 判断值的字节偏移
+int g_iCtlModeComID  = 0; // 控车模式 接收数据的端口号
+int g_iCtlModeValue  = 0; // 控车模式 判断值
+int g_iIsTRDP        = 0; // 判断是否为TRDP控车  兼容长客与四方股份
+int g_iETBN          = 0xaa; // 编组号
+
+unsigned char g_TrainId[4] = {0};
+
 bool    isFileOpen1701 = FALSE; // 文件是否被打开
 bool    isFileOpen1801 = FALSE; // 文件是否被打开
 int     g_iCycleCnt = 0;        // trdp刷新时间计数，以10ms定时器为基准，适应其他周期的数据
@@ -68,14 +94,17 @@ unsigned short g_iComTotalNum = 0; // 要记录变量的端口数量
 unsigned int  g_iTRDP_common_size; // 公共以太网 端口数量
 unsigned int  g_iTRDP_record_size; // 记录以太网 端口数量
 
-stTrdpPortPara trdpport_comm[15];    // 公共端口 配置
-stTrdpPortPara trdpport_record[80]; // 记录端口 配置
+mapFileInfo  g_mapFileLocal;       // 存储本地文件信息：文件名, 文件大小
+mapFileInfo  g_mapCompressFile;    // 存储本地文件信息：文件名, 文件大小
 
-mapFileInfo  g_mapFileLocal;   // 存储本地文件信息：文件名, 文件大小
-mapFileInfo  g_mapFileServer;  // 存储ftp服务端文件信息：文件名，文件大小
-listFileInfo g_uploadFileList; // 待同步 文件名
-listFileInfo g_removeFileList; // 待删除 文件名
-stConfigInfo stCfgInfo[200];   // 端口属性 设置
+mapFileInfo  g_mapFileServer;      // 存储ftp服务端文件信息：文件名，文件大小
+listFileInfo g_uploadFileList;     // 待同步 文件名
+listFileInfo g_removeFileList;     // 待删除 文件名
+
+stVarInfo g_stVarFault1[FAULT_MAX_SIZE];     // trdp 目标偏移以及 端口字节偏移、位偏移  一二级故障 信息
+stVarInfo g_stVarFault3[FAULT_MAX_SIZE];     // trdp 目标偏移以及 端口字节偏移、位偏移　三级故障 信息
+int g_iVarFault1Length;            // 一二级故障个数
+int g_iVarFault3Length;            // 三级故障个数
 
 typedef struct _PUT_DATA {
 	DG_U8 data[1500];
@@ -98,10 +127,14 @@ TRDP_PROCESS_CONFIG_T process_Config;
 
 DG_U32          ret_val;
 TRDP_PD_INFO_T  pd_info[150];
-TRDP_PUB_T      pub_handle_comm[15];     // 发布 句柄
-TRDP_PUB_T      pub_handle_record[15];   // 发布 句柄
+TRDP_PUB_T      pub_handle_comm[15];    // 发布 句柄
+TRDP_PUB_T      pub_handle_record[15];  // 发布 句柄
 TRDP_SUB_T      sub_handle_comm[80];    // 订阅 句柄
 TRDP_SUB_T      sub_handle_record[80];  // 订阅 句柄
+
+stTrdpPortPara trdpport_comm[15];         // 公共端口 配置
+stTrdpPortPara trdpport_record[80];       // 记录端口 配置
+stConfigInfo stCfgInfo[TRDP_PORT_NUMBER]; // 端口属性 设置
 
 HANDLE  hWriteDRU1;  // 互斥量
 HANDLE  hWriteDRU2;  // 互斥量
@@ -114,8 +147,8 @@ static void print_log(void *pRefCon, VOS_LOG_T category, const CHAR8 *pTime, con
 static void wait_for_msg();
 static DG_S32 trdp_pd_config();
 static void md_callback(void *ref, TRDP_APP_SESSION_T apph, const TRDP_MD_INFO_T *msg, UINT8 *data, UINT32 size);
-
-static void compressExport();
+static BOOL NOPSAVFTPIPSet(CString strsourceIP, BYTE bianzuNo, CString &tarstrIP);
+static void compressExport(CString strRecordFile);
 BOOL ExecCommand(CString strCmdLine);
 
 /* ==================================================================================
@@ -188,7 +221,7 @@ DG_S32 CTRDPServerDlg::trdp_pd_config()
 					TRDP_FLAGS_NONE,
 					trdpport_record[i].cycle * 1000,
 					TRDP_TO_SET_TO_ZERO);
-			printf("-subScribe---record----------------return: %d  pos:%d \n", ret_val, i);
+			printf("-SUBSCRIBE---record--------------return: %d  pos:%d \n", ret_val, i);
 		}	
 	}
 
@@ -222,7 +255,7 @@ DG_S32 CTRDPServerDlg::trdp_pd_config()
 					TRDP_FLAGS_NONE,
 					trdpport_comm[j].cycle * 1000,
 					TRDP_TO_SET_TO_ZERO);
-			printf("-subscribe---comm----------------return: %d  pos:%d \n", ret_val, j);
+			printf("-SUBSCRIBE---comm--------------return: %d  pos:%d \n", ret_val, j);
 		}	
 	}
 
@@ -299,6 +332,11 @@ CTRDPServerDlg::CTRDPServerDlg(CWnd* pParent /*=NULL*/)
 	m_bStop       = false;   // 暂停按钮  方便调试
 	m_iport       = 1000;
 	m_TRDPReceive = "TRDP data:";
+
+	// m_nTestType = 100;
+	// m_nTestPlace = 0;
+	// m_nTestValue = 0;
+
 	//}}AFX_DATA_INIT
 	// Note that LoadIcon does not require a subsequent DestroyIcon in Win32
 	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
@@ -310,6 +348,9 @@ void CTRDPServerDlg::DoDataExchange(CDataExchange* pDX)
 	//{{AFX_DATA_MAP(CTRDPServerDlg)
 	DDX_Control(pDX, IDC_EDIT2, m_status);
 	DDX_Control(pDX, IDC_LIST1, m_filelist);
+	//DDX_Control(pDX, IDC_EDIT_TYPE, m_nTestType);
+	//DDX_Control(pDX, IDC_EDIT_PLACE, m_nTestPlace);
+	//DDX_Control(pDX, IDC_EDIT_VALUE, m_nTestValue);
 	//DDX_Text(pDX, IDC_EDIT1, m_iport);
 	DDX_Text(pDX, IDC_EDIT3, m_TRDPReceive);
 	//}}AFX_DATA_MAP
@@ -340,6 +381,7 @@ BOOL CTRDPServerDlg::OnInitDialog()
 	ASSERT(IDM_ABOUTBOX < 0xF000);
 
 	CMenu* pSysMenu = GetSystemMenu(FALSE);
+
 
 	if (pSysMenu != NULL) {
 		CString strAboutMenu;
@@ -383,27 +425,85 @@ BOOL CTRDPServerDlg::OnInitDialog()
 
 	// TODO: Add extra initialization here
 	m_IsServerOn = FALSE;
-	flag  = 0;
-	flag1 = 0;
-	flag2 = 0;
-	m_ilen_comm = 1;  // 公共端口 的个数
-	m_ilen_record = 1;  // 记录端口数据的个数
+	m_ilen_comm = 1;   // 公共端口 的个数
+	m_ilen_record = 1; // 记录端口数据的个数
+	g_iVarFault1Length = 0;
+	g_iVarFault3Length = 0;
+	m_mapFault1Info.RemoveAll();  // 一二级故障 trdp 目标偏移，与 变量名
+	m_mapFault3Info.RemoveAll();   // 三级故障 trdp 目标偏移，与 变量名
+ 
+	memset(&g_stVarFault1, 0, sizeof(g_stVarFault1));  // clear
+	memset(&g_stVarFault3, 0, sizeof(g_stVarFault3));  // clear
 
-	getPort();
-	OnStartTRDP() ; //启动TRDP
+	getFaultConfig(m_mapVarInfo1, "fault_1301.xls");
+	getFaultConfig(m_mapFault1Info, "fault12.xls", 1);
+	g_iVarFault1Length = getVarInfo(g_stVarFault1, m_mapFault1Info, m_mapVarInfo1);
+	printf("g_iVarFault1Length : %d \r\n", g_iVarFault1Length);
+
+
+	getFaultConfig(m_mapVarInfo3, "fault_1801.xls");
+	getFaultConfig(m_mapFault3Info, "fault3.xls", 3);
+	g_iVarFault3Length = getVarInfo(g_stVarFault3, m_mapFault3Info, m_mapVarInfo3);
+	printf("g_iVarFault3Length : %d \r\n", g_iVarFault3Length);
+
+#if 0
+    // 写入文件 调试 
+	CFile file; //定义文件变量
+	CString filename = (".//variableTest_dest1.log");
+
+	if (file.Open(filename, CFile::modeCreate | CFile::modeWrite | CFile::shareDenyRead)) { 
+		file.SeekToBegin(); //到达文件开头 
+	}
+
+	CString  strEditTmp;
+	for (int ii=0; ii<g_iVarFault1Length; ii++) {
+		strEditTmp.Format("dest: %d, word:%d, offset:%d\r\n", g_stVarFault1[ii].iDestNum,
+				g_stVarFault1[ii].stOffset.iWordOffset, g_stVarFault1[ii].stOffset.iBitOffset);
+
+		file.Write(strEditTmp, strEditTmp.GetLength());     // 写入实际数据 
+	}
+	file.Close();
+
+    // 写入文件 调试 
+	CString filename3 = (".//variableTest_dest3.log");
+
+	if (file.Open(filename3, CFile::modeCreate | CFile::modeWrite | CFile::shareDenyRead)) { 
+		file.SeekToBegin(); //到达文件开头 
+	}
+
+	for (int i=0; i<g_iVarFault3Length; i++) {
+		strEditTmp.Format("dest: %d, word:%d, offset:%d\r\n", g_stVarFault3[i].iDestNum,
+				g_stVarFault3[i].stOffset.iWordOffset, g_stVarFault3[i].stOffset.iBitOffset);
+
+		file.Write(strEditTmp, strEditTmp.GetLength());     // 写入实际数据 
+	}
+	file.Close();
+#endif 
+
+    getConfig();    // 获取mvb与trdp 端口变量映射关系
+    getPort();      // 获取trdp配置相关信息
+    printf("g_iCtlType: %d, g_iCtlModeOffset: %d, g_iCtlModeComID: %d, g_iCtlModeValue: %d, g_iIsTRDP: %d \r\n", 
+            g_iCtlType, g_iCtlModeOffset, g_iCtlModeComID, g_iCtlModeValue, g_iIsTRDP);
+
+	OnStartTRDP() ; // 启动TRDP
 	m_strInfo = "TRDP服务器启动！";
 
 	printf("TRDP服务器启动！");
 
 	m_status.SetWindowText(m_strInfo);
 
+	GetDlgItem(IDC_EDIT_TYPE)->SetWindowText("99"); 
+	GetDlgItem(IDC_EDIT_PLACE)->SetWindowText("99");
+	GetDlgItem(IDC_EDIT_VALUE)->SetWindowText("99");
+	Sleep(3000);	// 延时3秒
+
 	SetTimer(TRDPSENDTIMER, 10000, NULL);  // 设置定时器 1000ms
 
 	/* 启动线程 */
 	AfxBeginThread(ThreadTrdpDataProcess, NULL);
-	// AfxBeginThread(ThreadFileSync, NULL);
+	AfxBeginThread(ThreadFileSync, NULL);
 	// AfxBeginThread(ThreadFileRecord, NULL);
-	//	AfxBeginThread(ThreadFileRecord, 0, THREAD_PRIORITY_HIGHEST);
+	AfxBeginThread(ThreadFileRecord, 0, THREAD_PRIORITY_HIGHEST);
 
 
 	return TRUE;  // return TRUE  unless you set the focus to a control
@@ -431,13 +531,46 @@ UINT ThreadFileSync(LPVOID lpParam)
 
 	CFTPFunc ftp;
 	while(1) {
+		/* 文件压缩 */
+		ftp.findFileLocal(g_mapCompressFile, DRUSTOREDIR2);  // 获取本地文件列表
+
+		/* 遍历map中的数据 */
+		CString strKey = _T(""), str = _T(""), strTarName = _T("");
+		POSITION pos = g_mapCompressFile.GetStartPosition();
+		CString strTimeType = _T("");
+		unsigned long int lTimeType = 0;
+
+		CString date = CTime::GetCurrentTime().Format("%m%d%H%M%S");
+		unsigned long int lDate = (unsigned long int)_ttoi64(date);
+
+		while (pos) {
+			g_mapCompressFile.GetNextAssoc(pos, strKey, str);
+
+			if (strKey.Right(3) == "edf" || strKey.Right(3) == "eds") {
+				// g_mapCompressFile.erase(strKey);
+				CString strTmp = strKey.Right(14);
+				strTimeType = strTmp.Left(10); 
+				lTimeType = (unsigned long int)_ttoi64(strTimeType);
+
+				if (lDate - lTimeType > 10000) {   // 获取 1个小时前 未压缩的文件名
+					strTarName = strKey;
+					break;
+				}
+			} 
+		}
+
+		// printf("get compress name :%s \r\n", strTarName);
+		compressExport(strTarName); // 文件压缩
+		strTarName = _T("");
+
+		/* 文件同步 */
 		if (false == ftp.ConnectToServer("127.0.0.1", "liuwming", "12345678", 21)) { // 连接FTP服务器  
 			printf("No Connected!!");
 			continue;
 		}
 
-		ftp.findFileFTPServer(g_mapFileServer, ".");           // 获取服务器文件列表
-		ftp.findFileLocal(g_mapFileLocal, "E://build Test1");  // 获取本地文件列表
+		ftp.findFileLocal(g_mapFileLocal, DRUSTOREDIR2);  // 获取本地文件列表
+		ftp.findFileFTPServer(g_mapFileServer, ".");      // 获取服务器文件列表
 
 		bool bUpload = ftp.checkFileWaitUpload(g_uploadFileList);  // 查找待上传文件信息
 		if (false == bUpload) {
@@ -480,7 +613,6 @@ UINT ThreadFileSync(LPVOID lpParam)
 	return 0;
 }
 
-#define REALDATASTOREDIR  "D:\\WTD_INFO\\实时数据"
 
 /**
  * @brief    -- ThreadFileRecord: 文件记录  
@@ -491,7 +623,7 @@ UINT ThreadFileRecord(LPVOID lpParam)
 {
 	printf("start {{ThreadFileRecord}} ...\n");
 
-	/* 记录文件，整点记录， 记录频率 :记录间隔： 100ms , 500ms */
+	/* 记录文件，整点记录， 记录频率 :记录间隔： 100ms , 1s */
 	/* 每小时生成一个文件；后缀分别为:edf、eds. */
 
 	/* 文件“000207_01_20160724000000.sbr”
@@ -505,14 +637,38 @@ UINT ThreadFileRecord(LPVOID lpParam)
 	CTime time;
 	CString newFile1801;
 	CString newFile1701;
-	unsigned char trainid[4] = {0x00, 0x02, 0x23, 0x11};
 	unsigned char CarID = 1;
 
 	time = CTime::GetCurrentTime();
 	CString date = time.Format("%Y%m%d%H%M%S");
 
-	newFile1701.Format("./1701File/%s.log", date);
-	newFile1801.Format("./1801File/%s.log", date);
+	CString csPath(DRUSTOREDIR2);
+	if (!PathIsDirectory(csPath)) { // 不存在则创建
+		CreateDirectory(csPath, 0);
+	}
+
+#if 0
+	csPath = CString(DRUSTOREDIR2) + "\\1701File";
+	if (!PathIsDirectory(csPath)) { // 不存在则创建
+		CreateDirectory(csPath, 0);
+	}
+#endif
+
+	newFile1701.Format("%02x%02x_%02x_%s.edf", g_TrainId[1], g_TrainId[2], g_TrainId[3], date);
+	newFile1701 = csPath + "\\" +  newFile1701;
+	printf("fileName:%s\n", newFile1701);
+
+#if 0
+	csPath = CString(DRUSTOREDIR2) + "\\1801File";
+	if (!PathIsDirectory(csPath)) { // 不存在则创建
+		CreateDirectory(csPath, 0);
+	}
+#endif
+
+	newFile1801.Format("%02x%02x_%02x_%s.eds", g_TrainId[1], g_TrainId[2], g_TrainId[3], date);
+	newFile1801 = csPath + "\\" +  newFile1801;
+	printf("fileName:%s\n", newFile1801);
+
 
 	// 第一次启动   按当前时间 创建文件，并开始记录 
 	CFileFind fFind;
@@ -555,24 +711,9 @@ UINT ThreadFileRecord(LPVOID lpParam)
 		CString date = time.Format("%Y%m%d%H%M%S");
 		CString tHM  = time.Format("%H%M%S");
 		int tHMS     = _ttoi(tHM);
-
-		/* 文件路径 */
-#if 0
-		CString strTmp;
-		newFile1801 = _T(REALDATASTOREDIR);
-		newFile1801 += _T("\\");
-		strTmp = "";
-		strTmp.Format("%02d%02d_", trainid[2], trainid[3]);
-		newFile1801 += strTmp;
-
-		strTmp = "";
-		strTmp.Format("%02d_", CarID);
-		newFile1801 += strTmp;
-		newFile1801 += date;
-		newFile1801 += _T(".log");	
-#endif
 		tHM += _T("\r\n");
 
+		//if ((tHMS % 100) == 0) { // 整点 {{10000}} 1h生成 1个文件 
 		if ((tHMS % 10000) == 0) { // 整点 {{10000}} 1h生成 1个文件 
 
 			CFileFind fFind;
@@ -581,8 +722,31 @@ UINT ThreadFileRecord(LPVOID lpParam)
 			FileRecordMVBTraAllData1801.Close();
 			isFileOpen1701 = FALSE;
 			isFileOpen1801 = FALSE;
-			newFile1701.Format("./1701File/%s.log", date);
-			newFile1801.Format("./1801File/%s.log", date);
+
+			/* 文件路径 */
+			CString csPath(DRUSTOREDIR2);
+			if (!PathIsDirectory(csPath)) { // 不存在则创建
+				CreateDirectory(csPath, 0);
+			}
+#if 0
+			csPath = CString(DRUSTOREDIR2) + "\\1701File";
+			if (!PathIsDirectory(csPath)) { // 不存在则创建
+				CreateDirectory(csPath, 0);
+			}
+#endif
+
+			newFile1701.Format("%02x%02x_%02x_%s.edf", g_TrainId[1], g_TrainId[2], g_TrainId[3], date);
+			newFile1701 = csPath + "\\" +  newFile1701;
+
+#if 0
+			csPath = CString(DRUSTOREDIR2) + "\\1801File";
+			if (!PathIsDirectory(csPath)) { // 不存在则创建
+				CreateDirectory(csPath, 0);
+			}
+#endif
+
+			newFile1801.Format("%02x%02x_%02x_%s.eds", g_TrainId[1], g_TrainId[2], g_TrainId[3], date);
+			newFile1801 = csPath + "\\" +  newFile1801;
 
 			if (fFind.FindFile(newFile1701)) {  // 文件 已存在 ，继续写
 				if (!FileRecordMVBTraAllData1701.Open(newFile1701, CFile::shareDenyNone | CFile::modeWrite | CFile::typeBinary)) {
@@ -670,8 +834,12 @@ UINT ThreadTrdpDataProcess(LPVOID lpParam)
 	printf("start  {{ThreadTrdpDataProcess}} ...\n");
 
 	static int iCounterLife = 0;
+	static stTrdpDataInfo dataGet;
+
 	st_data_info dataRecord;  // mvb 初始化
-	st_data_info dataComm;    // 初始化
+	st_data_info dataComm;    // comm 初始化
+	st_data_info dataFault1;   // fault1 初始化
+	st_data_info dataFault3;   // fault3 初始化
 
 	memcpy(dataComm.strType, "comm-record", strlen("comm-record"));
 	memset(dataComm.data,  0, 20000);
@@ -679,42 +847,59 @@ UINT ThreadTrdpDataProcess(LPVOID lpParam)
 	memcpy(dataRecord.strType, "tcn-bcn", strlen("tcn-bcn"));
 	memset(dataRecord.data,  0, 20000); 
 
-	unsigned char HeadPacket[22]  = {0}; // 组帧，初始化帧头。
-	unsigned char trainid[4] = {2,3,4,5};
+	memcpy(dataFault1.strType, "fault1", strlen("fault1"));
+	memset(dataFault1.data,  0, 20000); 
+
+	memcpy(dataFault3.strType, "fault3", strlen("fault1"));
+	memset(dataFault3.data,  0, 20000); 
+
+	unsigned char HeadPacket[22]  = {0}; // 组帧，初始化帧头: 需要根据协议填充。
 	unsigned char CarID = 0;
 	unsigned char SwVer = 0;
-	unsigned char CarInfID = 0;
+    /* 动车组车型区分码 默认：0x0A */
+	unsigned char CarInfID = 0x0A;
 
 	HeadPacket[0]  = 0xAA;
 	HeadPacket[1]  = 0xAB;
 	HeadPacket[2]  = 0xAC;
 	ULONG devid    = DeviceID;
+
+    /* 车载设备ID：例如：0x16020004 */
 	HeadPacket[3]  = (devid / 10000000) * 16 + (devid / 1000000) % 10;
 	HeadPacket[4]  = ((devid / 100000) % 10) * 16 +(devid / 10000) % 10;
 	HeadPacket[5]  = ((devid / 1000) % 10) * 16 + (devid / 100) % 10;
 	HeadPacket[6]  = ((devid / 10) % 10) * 16 + (devid) % 10;
-	HeadPacket[7]  = 0x00;   // version
-	HeadPacket[8]  = (trainid[2])/10 * 16 + trainid[2]%10;
-	HeadPacket[9]  = (trainid[3])/10 * 16 + trainid[3]%10;
-	HeadPacket[10] = CarID / 10 * 16 + CarID % 10;
-	HeadPacket[11] = 0x42;   // CarType
+
+    /* 设备所在列车号：例如：00523008 */
+	HeadPacket[7]  = ( g_TrainId[1])/10 * 16 +  g_TrainId[1]%10;
+	HeadPacket[8]  = ( g_TrainId[2])/10 * 16 +  g_TrainId[2]%10;
+	HeadPacket[9]  = ( g_TrainId[3])/10 * 16 +  g_TrainId[3]%10;
+	HeadPacket[10] = ( g_TrainId[4])/10 * 16 +  g_TrainId[4]%10;
+
+    /* 动车组车型代码 0x36 = CRH3A */
+	HeadPacket[11] = 0x36;   // CarType
 	HeadPacket[12] = CarInfID;
 	HeadPacket[13] = 0;
 	HeadPacket[14] = 0;
+
+    /* 协议版本 0x9C = 156 V1.56 */
 	HeadPacket[15] = SwVer;
-	HeadPacket[16] = 0;
+	HeadPacket[16] = 0; // 应答标志
+
+    /* 数据帧序号 */
 	HeadPacket[17] = 0;
 	HeadPacket[18] = 0;
 	HeadPacket[19] = 0;
 	HeadPacket[20] = 0;
+    /* 数据类型 0x41 = MVB端口数据所有 */
 	HeadPacket[21] = 0;
 
 	for (UINT i = 0; i < 13; i++) {
 		cData1701[i] = HeadPacket[i];
 	}
 
-	cData1701[13] = (LENGTH_1701 - 26) % 256;
-	cData1701[14] = (LENGTH_1701 - 26) / 256;
+	cData1701[13] = (LENGTH_1701 - 19) % 256;
+	cData1701[14] = (LENGTH_1701 - 19) / 256;
 	cData1701[15] = HeadPacket[15];
 
 	while (true) {
@@ -729,47 +914,55 @@ UINT ThreadTrdpDataProcess(LPVOID lpParam)
 
 				if (trdpport_comm[i].direction == PUBLISH) {					
 
-					// printf("direction %d, comid %d portsize %d cycle %d \r\n", trdpport_comm[i].direction, 
-					//	 	 trdpport_comm[i].comid, trdpport_comm[i].portsize, trdpport_comm[i].cycle);
+					//printf("direction %d, comid %d portsize %d cycle %d \r\n", trdpport_comm[i].direction, 
+					//		 trdpport_comm[i].comid, trdpport_comm[i].portsize, trdpport_comm[i].cycle);
 
-					st_data_info dataPut;
-					m_shareMemory.ReadMvbDatatoTrdp(&dataPut);   // 读取共享内存中的mvb数据
-
+#if 0
 					iCounterLife++;
-					if (iCounterLife >= 65535) {
+					if (iCounterLife >= 65530) {
 						iCounterLife = 0;
 					}
-
-					int retTmp = -99;
 
 					memset(putData[0].data, 0x55, 200);
 
 					/* 取消前两个字节发送生命信号 */
-					putData[0].data[0] = iCounterLife / 256;
-					putData[0].data[1] = iCounterLife % 256;
-					putData[0].data[2] = 0x99;
-					putData[0].data[3] = 0x33;
-					putData[0].data[4] = 0x88;
+					putData[0].data[0] =  iCounterLife / 256;
+					putData[0].data[1] =  iCounterLife % 256;
+					putData[0].data[2] =  0x99;
+					putData[0].data[3] =  0x33;
+					putData[0].data[4] =  0x88;
 
-					putData[0].data[28] = 0x55;
-					putData[0].data[29] = 0x88;
-					putData[0].data[30] = 0x00;
-					putData[0].data[31] = 0x01;
+					putData[0].data[28] =  0x55;
+					putData[0].data[29] =  0x88;
+					putData[0].data[30] =  0x00;
+					putData[0].data[31] =  0x01;
+#endif
+                    st_data_info dataPut;
+					m_shareMemory.ReadMvbDatatoTrdp(&dataPut);   // 读取共享内存中的mvb数据
+					memcpy(g_TrainId, dataPut.data + 7, 4);
+
+#if 0
+                    printf("ReadMvbDatatoTrdp type : %s, \r\n", dataPut.strType);
+
+                    for (int icounter = 0; icounter < 100; icounter++) {
+                        printf("read data[%d]:0x%x \r\n", icounter, (unsigned char)dataPut.data[icounter]);
+                    }
+#endif
+					int retTmp = -99;
+
 					try {
-						printf("putdata value:%x,   portsize:%d,   pub_handle_addr:%p\n", putData[0].data[1], trdpport_comm[i].portsize, &pub_handle_comm[i]);
+						//printf("putdata value:%x, portsize:%d, pub_handle_addr:%p\n", putData[0].data[1], trdpport_comm[i].portsize, &pub_handle_comm[i]);
 
-						retTmp = tlp_put(session_handle, pub_handle_comm[i], (DG_U8*)&putData[0].data, trdpport_comm[i].portsize);  
-
+						retTmp = tlp_put(session_handle, pub_handle_comm[i], (DG_U8*)&dataPut.data + 60, trdpport_comm[i].portsize);    // + 60 字节偏移为60
 					} catch (...) {
 						printf("catch---exception --\n");
 					}
 
-					printf("Put comID:%d, return %d  IP_addr: %s\r\n", trdpport_comm[i].comid, retTmp, trdpport_comm[i].trdpip);
+					// printf("Put comID:%d, return %d  IP_addr: %s\r\n", trdpport_comm[i].comid, retTmp, trdpport_comm[i].trdpip);
 					tlc_process(session_handle, NULL, NULL);
 
 				} else if (trdpport_comm[i].direction == SUBSCRIBE) {
 
-					stTrdpDataInfo  dataGet;
 					dataGet.lPort = trdpport_comm[i].comid;
 					dataGet.portSize = trdpport_comm[i].portsize;
 					ret_val = tlp_get(session_handle, sub_handle_comm[i], &pd_info[i], (DG_U8*)&dataGet.data, &trdpport_comm[i].portsize);
@@ -777,7 +970,7 @@ UINT ThreadTrdpDataProcess(LPVOID lpParam)
 
 					if (TRDP_NO_ERR == ret_val) {   // 收发数据无错误  -> 处理数据
 						/* 1，获取TRDP数据 */
-						/* cData1701 : (head){22} + (data){960 + 960} +  (fcs + end){1 + 3}  = 1946 (LENGTH_1701) */
+						/* cData1701 : (head){22} + (data){960 + 960 + 960 + 960} +  (fcs + end){1 + 3}  = 3866 (LENGTH_1701) */
 						if (dataGet.lPort == 1701) {  // 1701 数据长度为 1000
 							// unCounter dataLength;
 							// memcpy(dataLength.cCounter, dataGet.data +24, 4); // 获取报文 应用内容的实际长度
@@ -787,25 +980,108 @@ UINT ThreadTrdpDataProcess(LPVOID lpParam)
 							memcpy(cData1701+ 960 + 22, dataGet.data + 40, 960);
 						}   
 
-						/* cData1801 : (head){22} + (data){960 + 960 + 1360 + 1360} +  (fcs + end){1 + 3}  = 4666 (LENGTH_1801) */
+						if (dataGet.lPort == 1703) {  // 1702 数据长度为 1000  
+							memcpy(cData1701+ 960 + 960 + 22, dataGet.data + 40, 960);
+						}   
+
+						if (dataGet.lPort == 1704) {  // 1702 数据长度为 1000  
+							memcpy(cData1701+ 960 + 960 +960 + 22, dataGet.data + 40, 960);
+						}   
+
+						/* cData1801 : (head){22} + (data){960 + 960 + 960 + 960 + 1360 + 1360 + 1360 + 1360} + (fcs + end){1 + 3} = 9306 (LENGTH_1801) */
 						if (dataGet.lPort == 1801) { // 1801 数据长度为 1000  
 							memcpy(cData1801 + 22, dataGet.data + 40, 960);
+
+                            /* 获取 三级 故障数据 */
+                            for (int i = 0; i < g_iVarFault3Length; i++) {
+                                cDataFault3C1[g_stVarFault3[i].iDestNum] = 
+                                    GET_BIT(dataGet.data[g_stVarFault3[i].stOffset.iWordOffset + 40],  g_stVarFault3[i].stOffset.iBitOffset);
+                            }
+
+							memcpy(dataFault3.data, cDataFault3C1, g_iVarFault3Length);
 						}
 						if (dataGet.lPort == 1802) { // 1802 数据长度为 1000  
 							memcpy(cData1801 + 960 + 22, dataGet.data + 40, 960);
+                            /* 获取 三级 故障数据 */
+                            for (int i = 0; i < g_iVarFault3Length; i++) {
+                                cDataFault3C2[g_stVarFault3[i].iDestNum] = 
+                                    GET_BIT(dataGet.data[g_stVarFault3[i].stOffset.iWordOffset + 40],  g_stVarFault3[i].stOffset.iBitOffset);
+                            }
+
+							memcpy(dataFault3.data + 5000, cDataFault3C2, g_iVarFault3Length);
+						}
+						if (dataGet.lPort == 1803) { // 1802 数据长度为 1000  
+							memcpy(cData1801 + 960 + 960 + 22, dataGet.data + 40, 960);
+                            /* 获取 三级 故障数据 */
+                            for (int i = 0; i < g_iVarFault3Length; i++) {
+                                cDataFault3C3[g_stVarFault3[i].iDestNum] = 
+                                    GET_BIT(dataGet.data[g_stVarFault3[i].stOffset.iWordOffset + 40],  g_stVarFault3[i].stOffset.iBitOffset);
+                            }
+
+							memcpy(dataFault3.data + 10000, cDataFault3C3, g_iVarFault3Length);
+						}
+						if (dataGet.lPort == 1804) { // 1802 数据长度为 1000  
+							memcpy(cData1801 + 960 + 960 + 960 + 22, dataGet.data + 40, 960);
+                            /* 获取 三级 故障数据 */
+                            for (int i = 0; i < g_iVarFault3Length; i++) {
+                                cDataFault3C4[g_stVarFault3[i].iDestNum] = 
+                                    GET_BIT(dataGet.data[g_stVarFault3[i].stOffset.iWordOffset + 40],  g_stVarFault3[i].stOffset.iBitOffset);
+                            }
+
+							memcpy(dataFault3.data + 15000, cDataFault3C4, g_iVarFault3Length);
 						}
 						if (dataGet.lPort == 1301) { // 1301 数据长度为 1400  
-							memcpy(cData1801 + 960 + 960 + 22, dataGet.data + 40, 1360);
+							memcpy(cData1801 + 3840 + 22, dataGet.data + 40, 1360);  // 960 * 6 = 3840
+
+                            /* 获取 一二级 故障数据 */
+                            for (int i = 0; i < g_iVarFault1Length; i++) {
+                                cDataFault1C1[g_stVarFault1[i].iDestNum] = 
+                                    GET_BIT(dataGet.data[g_stVarFault1[i].stOffset.iWordOffset + 40],  g_stVarFault1[i].stOffset.iBitOffset);
+                            }
+
+							memcpy(dataFault1.data, cDataFault1C1, g_iVarFault1Length);
 						}
 						if (dataGet.lPort == 1302) { // 1302 数据长度为 1400  
-							memcpy(cData1801 + 1360 + 960 + 960 + 22, dataGet.data + 40, 1360);
+							memcpy(cData1801 + 1360 + 3840 + 22, dataGet.data + 40, 1360);
+
+                            /* 获取 一二级 故障数据 */
+                            for (int i = 0; i < g_iVarFault1Length; i++) {
+                                cDataFault1C2[g_stVarFault1[i].iDestNum] = 
+                                    GET_BIT(dataGet.data[g_stVarFault1[i].stOffset.iWordOffset + 40],  g_stVarFault1[i].stOffset.iBitOffset);
+                            }
+
+							memcpy(dataFault1.data + 5000, cDataFault1C2, g_iVarFault1Length);
+						}
+						if (dataGet.lPort == 1303) { // 1302 数据长度为 1400  
+							memcpy(cData1801 + 1360 + 1360 + 3840 + 22, dataGet.data + 40, 1360);
+
+                            /* 获取 一二级 故障数据 */
+                            for (int i = 0; i < g_iVarFault1Length; i++) {
+                                cDataFault1C3[g_stVarFault1[i].iDestNum] = 
+                                    GET_BIT(dataGet.data[g_stVarFault1[i].stOffset.iWordOffset + 40],  g_stVarFault1[i].stOffset.iBitOffset);
+                            }
+
+							memcpy(dataFault1.data + 5000, cDataFault1C3, g_iVarFault1Length);
+						}
+						if (dataGet.lPort == 1304) { // 1302 数据长度为 1400  
+							memcpy(cData1801 + 1340 + 1360 + 1360 + 3840 + 22, dataGet.data + 40, 1360);
+
+                            /* 获取 一二级 故障数据 */
+                            for (int i = 0; i < g_iVarFault1Length; i++) {
+                                cDataFault1C4[g_stVarFault1[i].iDestNum] = 
+                                    GET_BIT(dataGet.data[g_stVarFault1[i].stOffset.iWordOffset + 40],  g_stVarFault1[i].stOffset.iBitOffset);
+                            }
+
+							memcpy(dataFault1.data + 5000, cDataFault1C4, g_iVarFault1Length);
 						}
 
 						/* 2，对 1701/1801 数据进行处理 。头、尾、校验 */
 						/* 对数据进行处理，提取数据区，重新组帧 */
-						/* 组帧：0xAA 0xAB [4]{carNumber} [2]{dataLength} [1]{version} [4]{frameNumber} [1]{dataType 0x42} [6]{utc时间 ms} [n]{data} [1]{FCS} 0xBA 0xBB */
+						/* 组帧：0xAA 0xAB 0xAC [4]{carNumber} [2]{dataLength} [1]{version} [4]{frameNumber} [1]{dataType 0x42} 
+                         * [6]{utc时间 ms} [n]{data} [1]{FCS} 0xBA 0xBB */
 
-						if ((dataGet.lPort == 1701) || (dataGet.lPort == 1702)) {  // 1701 
+						if ((dataGet.lPort == 1701) || (dataGet.lPort == 1702) ||
+                                (dataGet.lPort == 1703) || (dataGet.lPort == 1704)) {  // 1701 
 							unCounter frameNumber1701;
 
 							frameNumber1701.iCounter = 0;  // 计数 初始化
@@ -819,19 +1095,25 @@ UINT ThreadTrdpDataProcess(LPVOID lpParam)
 							cData1701[18] = frameNumber1701.cCounter[1];
 							cData1701[19] = frameNumber1701.cCounter[2];
 							cData1701[20] = frameNumber1701.cCounter[3];
-							cData1701[21] = 0x41;
+							cData1701[21] = 0x42; // 0x42 =公共端口信息 1701~1704 100ms
 
 							BYTE  FCS = 0;
 							for (unsigned short iall = 3; iall < LENGTH_1701 - 4; iall++) {		
 								FCS ^= cData1701[iall];
 							}
+
+                            /* 尾帧 */
 							cData1701[LENGTH_1701 - 4] = FCS;
+							cData1701[LENGTH_1701 - 3] = 0xBA; 
+							cData1701[LENGTH_1701 - 2] = 0xBB;
+							cData1701[LENGTH_1701 - 1] = 0xBC;
 
 							memcpy(dataComm.data, cData1701, LENGTH_1701);
 						}
 
-						if ((dataGet.lPort == 1801) || (dataGet.lPort == 1802) || (dataGet.lPort == 1301) || (dataGet.lPort == 1302)) {  // 1801 
-							unCounter frameNumber1801;
+                        if ( (dataGet.lPort == 1801) || (dataGet.lPort == 1802) || (dataGet.lPort == 1803) || (dataGet.lPort == 1804) ||
+                                (dataGet.lPort == 1301) || (dataGet.lPort == 1302) || (dataGet.lPort == 1303) || (dataGet.lPort == 1304)) {  // 1801 
+                            unCounter frameNumber1801;
 
 							frameNumber1801.iCounter = 0;  // 计数 初始化
 							frameNumber1801.iCounter++;
@@ -843,27 +1125,38 @@ UINT ThreadTrdpDataProcess(LPVOID lpParam)
 								cData1801[i] = HeadPacket[i];
 							}
 
-							cData1801[13] = (LENGTH_1801 - 26) % 256;
-							cData1801[14] = (LENGTH_1801 - 26) / 256;
+							cData1801[13] = (LENGTH_1801 - 19) % 256;
+							cData1801[14] = (LENGTH_1801 - 19) / 256;
 							cData1801[15] = HeadPacket[15];
 							cData1801[16] = 0;
 							cData1801[17] = frameNumber1801.cCounter[0];
 							cData1801[18] = frameNumber1801.cCounter[1];
 							cData1801[19] = frameNumber1801.cCounter[2];
 							cData1801[20] = frameNumber1801.cCounter[3];
-							cData1801[21] = 0x41;
+							cData1801[21] = 0x43; // 0x43 = 一二三级故障信息 1301~1304 1801~1804 500ms
 
 							BYTE  FCS = 0;
 							for (unsigned short iall = 3; iall < LENGTH_1801 - 4; iall++) {		
 								FCS ^= cData1801[iall];
 							}
-							cData1801[LENGTH_1801 - 4] = FCS;
+
+                            /* 尾帧 */
+							cData1801[LENGTH_1801 - 4] = FCS;  
+							cData1801[LENGTH_1801 - 3] = 0xBA; 
+							cData1801[LENGTH_1801 - 2] = 0xBB;
+							cData1801[LENGTH_1801 - 1] = 0xBC;
 
 							memcpy(dataComm.data + 10000 , cData1801, LENGTH_1801);
 						}
 
 						/* 3，写入共享内存 */
-						m_shareMemory.WriteTrdpDatatoMvb(&dataComm, 0);
+						m_shareMemory.WriteTrdpDatatoMvb(&dataComm, 0);     // 公共 数据
+
+						if (g_iCtlType == 1) { // 1：trdp控车、 0： mvb控车
+							m_shareMemory.WriteTrdpDatatoMvb(&dataFault1, 2);   // 一二级故障 数据
+						}
+
+						m_shareMemory.WriteTrdpDatatoMvb(&dataFault3, 3);   // san级故障 数据
 					}
 
 					tlc_process(session_handle, NULL, NULL);
@@ -874,30 +1167,43 @@ UINT ThreadTrdpDataProcess(LPVOID lpParam)
 		/* dru过程数据 */
 		for (int j=0; j <  g_iTRDP_record_size; j++) {
 			if ((g_iCycleCnt % (trdpport_record[j].cycle / 10)) == 0) {  // 计算刷新周期
-				//printf("g_iCycleCnt: %d, com:%d, cycle:%d \r\n", g_iCycleCnt, trdpport_record[j].comid, trdpport_record[j].cycle);
+				// printf("g_iCycleCnt: %d, com:%d, cycle:%d \r\n", g_iCycleCnt, trdpport_record[j].comid, trdpport_record[j].cycle);
 
-				stTrdpDataInfo  dataGetRecord;
-				dataGetRecord.lPort = trdpport_record[j].comid;
-				dataGetRecord.portSize =  trdpport_record[j].portsize;
+				stTrdpDataInfo  dataGetRecord; 
+                /* 控车模式判断 */
+                if (trdpport_record[j].comid == g_iCtlModeComID) {
+                    ret_val = tlp_get(session_handle, sub_handle_record[j], &pd_info[j], (DG_U8*)&dataGetRecord.data, &trdpport_record[j].portsize);
 
-				ret_val = tlp_get(session_handle, sub_handle_record[j], &pd_info[j], (DG_U8*)&dataGetRecord.data, &trdpport_record[j].portsize);
+                    if (TRDP_NO_ERR == ret_val) {   // 收发数据无错误  -> 处理数据
+                        if (dataGetRecord.data[g_iCtlModeOffset] == g_iCtlModeValue) {
+                            g_iCtlType = 1; // 控车模式   ：1：trdp控车、 0： mvb控车
+                        } else {
+                            g_iCtlType = 0; // 控车模式   ：1：trdp控车、 0： mvb控车
+                        }
+                    }
+                }
 
-				//	printf("Get %d,return %d \r\n",trdpport_record[j].comid, ret_val);
+                if (g_iCtlType == 1) { // 1：trdp控车、 0： mvb控车
+                    dataGetRecord.lPort = trdpport_record[j].comid;
+                    dataGetRecord.portSize =  trdpport_record[j].portsize;
+                    ret_val = tlp_get(session_handle, sub_handle_record[j], &pd_info[j], (DG_U8*)&dataGetRecord.data, &trdpport_record[j].portsize);
 
-				if (TRDP_NO_ERR == ret_val) {   // 收发数据无错误  -> 处理数据
-					for (int ii = 0; ii < g_iComTotalNum; ii++) {
-						if (dataGetRecord.lPort == stCfgInfo[ii].comId) {
-							for (int iter = 0; iter < stCfgInfo[ii].counter; ++iter) {
-								dataRecord.data[stCfgInfo[ii].varInfo[iter].destNum] =
-									dataGetRecord.data[stCfgInfo[ii].varInfo[iter].srcNum];  // 按配置文件要求，把相应的TRDP字节存储到mvbBuf
-							}
-						}
-					}
+                    if (TRDP_NO_ERR == ret_val) {   // 收发数据无错误  -> 处理数据
+                        // printf("Get %d,return %d \r\n",trdpport_record[j].comid, ret_val);
+                        for (int ii = 0; ii < g_iComTotalNum; ii++) {
+                            if (dataGetRecord.lPort == stCfgInfo[ii].comId) {
+                                for (int iter = 0; iter < stCfgInfo[ii].counter; ++iter) {
+                                    dataRecord.data[stCfgInfo[ii].varInfo[iter].destNum] =
+                                        dataGetRecord.data[stCfgInfo[ii].varInfo[iter].srcNum];  // 按配置文件要求，把相应的TRDP字节存储到mvbBuf
+                                }
+                            }
+                        }
 
-					/*写入共享内存 */
-					m_shareMemory.WriteTrdpDatatoMvb(&dataRecord, 1);
+                        /*写入共享内存 */
+                        m_shareMemory.WriteTrdpDatatoMvb(&dataRecord, 1);
 
-				}
+                    }
+                }
 				tlc_process(session_handle, NULL, NULL);
 			}
 		}
@@ -1103,6 +1409,29 @@ void CTRDPServerDlg::getPort()
         //将故障信息写入日志文件
     }
 
+
+    str = Rows.GetAt(1);   // comid
+    if (str != "") {
+        sscanf(str, "%d", &t);
+        g_iCtlModeComID = t[0];
+    } 
+    str = Rows.GetAt(2);   // word offset
+    if (str != "") {
+        sscanf(str, "%d", &t);
+        g_iCtlModeOffset = t[0];
+    } 
+    str = Rows.GetAt(3);   // Value
+    if (str != "") {
+        sscanf(str, "%d", &t);
+        g_iCtlModeValue = t[0];
+    } 
+
+    str = Rows.GetAt(4);   // 兼容 TRDP 
+    if (str != "") {
+        sscanf(str, "%d", &t);
+        g_iIsTRDP = t[0];
+    } 
+
 	return;
 }
 
@@ -1220,41 +1549,103 @@ HCURSOR CTRDPServerDlg::OnQueryDragIcon()
  */
 void CTRDPServerDlg::OnTimer(UINT nIDEvent) 
 { 
+	st_data_info dataReserve;  // mvb 初始化
+	memcpy(dataReserve.strType, "other", strlen("other"));
+	memset(dataReserve.data, 0, 20000); 
+
 	// TODO: Add your message handler code here and/or call default
 	switch (nIDEvent) {
 		case TRDPSENDTIMER:  // 10ms
 
-			// compressExport(); //  ya suo  wen jian
 
-#if 0
-			if (0 == getIP(strFtpIP)) {
-				printf("get IP OK!!");
-			}
-#endif
+#if 1
+			// 计算FTP的防火墙设置地址
+			// strFtpIP: ftp 服务器ip地址          strLocalIP: local ip地址
 
+            try {
+                g_iETBN = getETBN();  // bianzu
+				int iTmp = 0;
+
+				if ( g_iETBN >= 1 &&  g_iETBN  <= 2) {
+					iTmp =  3 - g_iETBN;
+				} else if ( g_iETBN == 3 ||  g_iETBN  == 4) {
+					iTmp =  7 - g_iETBN;
+				}
+
+                NOPSAVFTPIPSet(strLocalIP, iTmp, strFtpIP);
+            } catch (...) {
+                printf("get ETBN exception-----\r\n");
+
+            }
 			m_TRDPReceive.Empty();
 			CString strTmp100;
 			for (int c=0; c<100; c++) {
-				strTmp100.Format("%02X ", *(cData1701 + c));     // get data
+				strTmp100.Format("%02X ", *(cData1701 + c));   // get data
 				m_TRDPReceive += strTmp100;
 			}
+#endif
 
-			// UpdateData(FALSE);
+#if 0
+			st_data_info dataPut;
+			m_shareMemory.ReadMvbDatatoTrdp(&dataPut, 1);   // 读取共享内存中的mvb数据
+
+			printf("ReadMvbDatatoTrdp type : %s, \r\n", dataPut.strType);
+			for (int icounter = 0; icounter < 100; icounter++) {
+				printf("read data[%d]:0x%x \r\n", icounter, (unsigned char)dataPut.data[icounter]);
+			}
+
+#endif
+			UpdateData(TRUE);
+
+			st_data_info dataRecord;  // mvb 初始化
+			memcpy(dataRecord.strType, "tcn-bcn", strlen("tcn-bcn"));
+			memset(dataRecord.data,  0, 20000); 
+
+			char ch1[10],ch2[10],ch3[10];
+			unsigned char ucTestType, ucTestValue, ucTestPlace;
+
+			GetDlgItem(IDC_EDIT_TYPE)->GetWindowText(ch1, 10); 
+			GetDlgItem(IDC_EDIT_PLACE)->GetWindowText(ch2, 10);
+			GetDlgItem(IDC_EDIT_VALUE)->GetWindowText(ch3, 10);
+
+			ucTestType  = atoi(ch1);
+			ucTestPlace = atoi(ch2);
+			ucTestValue = atoi(ch3);
+
+			printf("ucTest Type   data:%x \r\n", ucTestType);
+			printf("ucTest OffSet data:%x \r\n", ucTestPlace);
+			printf("ucTest Value  data:%x \r\n", ucTestValue);
+
+			if (ucTestType >= 0 && ucTestType <= 5) {
+				dataRecord.data[ucTestPlace] = ucTestValue;
+				/*写入共享内存 */
+				m_shareMemory.WriteTrdpDatatoMvb(&dataRecord, ucTestType);
+			}
+
 			break;
 	}
 
-	CDialog::OnTimer(nIDEvent);
+	/**
+	 *  TRDP传给MVB的信息格式（共享内存4）
+	 *	 第0字节：编组信息
+	 *	 第1字节：控车模式标志位，（如果读不到0xAA，可赋值为0）
+	 */
 
+	dataReserve.data[0] = g_iETBN;
+	dataReserve.data[1] = g_iCtlType;
+	printf("bian zu hao : %02x \r\n ", g_iETBN);
+	m_shareMemory.WriteTrdpDatatoMvb(&dataReserve, 4);
+
+	CDialog::OnTimer(nIDEvent);
 }
 
 /**
- * @brief    -- getIP 
+ * @brief    --  getETBN
  */
 /**
- * @brief    -- getIP :获取对面列车编组号 ，计算出ip地址。 
- * @param[o] -- strIP :IP地址
+ * @brief    -- getETBN: 获取对面列车编组号 
  */
-int CTRDPServerDlg::getIP(CString &strIP)  
+unsigned char CTRDPServerDlg::getETBN()  
 {
 	bIsCurrentETBNValid = 0;
 	iCurrentETBNNO=0;
@@ -1287,7 +1678,7 @@ int CTRDPServerDlg::getIP(CString &strIP)
 	/* 将sock绑定到本机某端口上。 */
 	local.sin_family      = AF_INET;
 	local.sin_port        = htons(MCASTPORT);
-	local.sin_addr.s_addr = INADDR_ANY;
+	local.sin_addr.s_addr = INADDR_ANY;   // 绑定此组播IP到自身的套接字上
 
 	if (bind(sock, (struct sockaddr*)&local, sizeof(local)) == SOCKET_ERROR) {
 		closesocket(sock);
@@ -1343,13 +1734,13 @@ int CTRDPServerDlg::getIP(CString &strIP)
 		ComId = (recvbuf[8] << 24) + (recvbuf[9] << 16) + (recvbuf[10] << 8) + recvbuf[11];
 
 		if (ComId == 100) {
-			ret = recvbuf[92];
+			ret = recvbuf[93];
 			str_ret.Format("Current_ETBN %d", ret);
 			bIsCurrentETBNValid = 1;
 			iCurrentETBNNO      = ret;
 			printf("%s\n", str_ret);
 
-			CString strIp = "10.0.0.1";    // 根据编组号，计算出IP地址
+			CString strIp = "10.0.0.1";    
 		}
 		break;
 
@@ -1366,8 +1757,7 @@ int CTRDPServerDlg::getIP(CString &strIP)
 		printf("已获取本地编组号，请选择要连接设备所在的编组号");
 	}
 	iGetETBNThreaState = 0;
-
-	return 0;
+	return ret; // 根据编组号
 }
 
 CFTPFunc::CFTPFunc()
@@ -1402,7 +1792,7 @@ BOOL CFTPFunc::ConnectToServer(LPCTSTR ServerIP, LPCTSTR name, LPCTSTR Password,
 
 	try { 
 		if (m_pFtpConnection == NULL) {
-			m_pFtpConnection = m_pInetSession->GetFtpConnection(ServerIP, name, Password, port);
+			m_pFtpConnection = m_pInetSession->GetFtpConnection(ServerIP, name, Password, port);  // 默认使用主动模式
 		} else {
 			return true;
 		}
@@ -1573,14 +1963,16 @@ void  CFTPFunc::findFileLocal(mapFileInfo &mapFileLocal, CString strDir)
 		} 
 	} 
 
+#if 0
 	/* 遍历map中的数据 */
 	CString strKey = _T(""), str = _T("");
 	POSITION pos = mapFileLocal.GetStartPosition();
 
 	while (pos) {
 		mapFileLocal.GetNextAssoc(pos, strKey, str);
-		printf("localFileName:%s,\n size:%s\n", strKey, str );
+		printf("localFileName:%s, \t size:%s\n", strKey, str );
 	}
+#endif
 }
 
 /**
@@ -1669,29 +2061,29 @@ void CTRDPServerDlg::getConfig()
 #endif 
 
 	CString strFileName;
-	CString path = "C:\\config\\DRU表格汇总20181121.xls";
-	CSpreadSheet xls_comm(path, "Sheet1"); //sheet1  公共端口数据
+	CString path = "C:\\config\\DRU_Config.xls";
+//	CString path = "C:\\config\\DRU表格汇总20181121.xls";
+	path.Replace("\\", "\\\\");
+
+	CSpreadSheet xls_dru(path, "Sheet1"); // dru_config
 
 	CStringArray Rows;  // 定义工作表的行和列
 	CStringArray Column; 
 	int index = 0;
 
-	if (index > xls_comm.GetTotalRows())  {
-		index = 1;  //行从1开始，列从0开始
-	}
-
 	CString str;
 	int i;
-	int t;              // 临时变量
-	int ans = 0;        // 端口数量     端口索引
-	int iNumIndex = 0;  // 端口中的变量 字索引
-	int iBitPos = 0;    // 变量的       位索引
-	int comidTmp[300] = {0};  // 端口数量 
-	int wordTmp[100] = {0};
+	int t;                   // 临时变量
+	int ans           = 0;   // 端口数量     端口索引
+	int iNumIndex     = 0;   // 端口中的变量 字索引
+	int iBitPos       = 0;   // 变量的       位索引
+	int comidTmp[35000] = {0}; // 端口数量
+	int wordTmp[10000]  = {0};
 
-	m_ilen_comm = xls_comm.GetTotalRows();
+	m_ilen_comm = xls_dru.GetTotalRows();
+	//printf("Length : %d\n", m_ilen_comm);
 	for (index=3,  i = 0; index <= m_ilen_comm; index++, ++i) {  
-		xls_comm.ReadRow(Rows, index); // 逐行读取
+		xls_dru.ReadRow(Rows, index); // 逐行读取
 
 		/* 解析每一行的内容 */
 		str = Rows.GetAt(24);   // COMID
@@ -1701,10 +2093,12 @@ void CTRDPServerDlg::getConfig()
 
 			if (i >= 1) {
 				if (comidTmp[i-1] != t) {    // 查找不同 的 Com ID 
+					printf("commid: %d \n", t);
 					ans++;
 					iNumIndex = 0;
 				}
 				stCfgInfo[ans].comId = t;
+
 			} 
 
 		} else {
@@ -1718,11 +2112,11 @@ void CTRDPServerDlg::getConfig()
 			if (wordTmp[iBitPos - 1] != t) {
 				++iNumIndex;
 				iBitPos = 0;
+				// printf("wordTmp -1 %d wordTmp: %d \n", wordTmp[iBitPos - 1], t);
 			}
 
 			wordTmp[iBitPos] = t;
 			stCfgInfo[ans].varInfo[iNumIndex].srcNum = t;
-
 		} 
 
 		str = Rows.GetAt(25);
@@ -1749,6 +2143,20 @@ void CTRDPServerDlg::getConfig()
 			sscanf(str, "%d", &t);
 			stCfgInfo[ans].portSize = t;
 		}
+
+#if 0
+		printf("COMID[%d] PORTSIZE[%d] COUNTER[%d] VAR[%s] WORD[%d]:%d{%d} -> DEST[%d]  i: %d  ans: %d \r\n", 
+				stCfgInfo[ans].comId,
+				stCfgInfo[ans].portSize,
+				stCfgInfo[ans].counter,
+				stCfgInfo[ans].varInfo[iNumIndex].srcPos[iBitPos].varType,
+				stCfgInfo[ans].varInfo[iNumIndex].srcNum,
+				stCfgInfo[ans].varInfo[iNumIndex].srcPos[iBitPos].bit,
+				stCfgInfo[ans].varInfo[iNumIndex].bitNum,
+				stCfgInfo[ans].varInfo[iNumIndex].destNum, 
+				i,
+				ans);
+#endif
 
 		iBitPos++;
 		stCfgInfo[ans].varInfo[iNumIndex].bitNum = iBitPos;   // 每个字节 包含的待处理的 位数 
@@ -1832,7 +2240,8 @@ BOOL NOPSAVFTPIPSet(CString strsourceIP, BYTE bianzuNo, CString &tarstrIP)
 	tarstrIP = str3;
 	str3 = "--->IP Global: ";
 	str3 += tarstrIP;
-	AfxMessageBox(str2 + str3);
+	printf("%s \r\n", str2 + str3);
+	//AfxMessageBox(str2 + str3);
 
 	return TRUE;
 }
@@ -1916,16 +2325,17 @@ BOOL DeleteTempDirectory(CString strPath)
  */
 void compressExport(CString strRecordFile)
 {
-	CString strFile("Rundata_2018_12_05.zip"), strPath, strTar;//, strRecordFile;
+	if (strRecordFile == _T("")) 
+		return;
+
+ 	CString strTar = CString(DRUSTOREDIR2) + "\\" +  strRecordFile + ".zip";
+	CString csFullName = CString(DRUSTOREDIR2) + "\\" + strRecordFile;
+
 	CString strCmd,  strDll,  strCmdLine;
 	CString strDirMnt, strDirNandflash, strDirDatabase;
 	TCHAR szPath[MAX_PATH];
 	memset(szPath, 0, MAX_PATH);
 	::GetCurrentDirectory(MAX_PATH, szPath);
-
-	printf("dir: %s\r\n", szPath);
-	CString strTmp("Rundata_2018_12_05");
-	strRecordFile.Format(_T("%s\\%s\\**"), szPath, strTmp);
 
 	strCmd.Format(_T("%s\\7z.exe"), szPath);
 	strDll.Format(_T("%s\\7z.dll"), szPath);
@@ -1935,14 +2345,211 @@ void compressExport(CString strRecordFile)
 		printf(_T("7z运行环境不存在，请确认已正确安装!"));
 		return;
 	}
-	if (!finder.FindFile() || !finder.FindFile(strRecordFile)) {
+	if (!finder.FindFile() || !finder.FindFile(csFullName)) {
 		printf(_T("文件不存在!"));
 		return;
 	}
 
-	strCmdLine.Format(_T("\"%s\" a -y -tgzip -sdel \"%s\" \"%s\""), strCmd, strFile, strRecordFile); // 压缩完成后，删除 
+	strCmdLine.Format(_T("\"%s\" a -y -tgzip -sdel \"%s\" \"%s\""), strCmd, strTar, csFullName); // 压缩完成后，删除 
 	if (!ExecCommand(strCmdLine))
 		return;
 	printf(_T("文件压缩成功!"));
 }
 #endif 
+
+/**
+ * @brief    -- getFaultConfig ：从 strFileName配置 文件中 获取TRDP变量与MVB故障信息的映射关系
+ * @param[ ] -- mapInfo        : key : number  value: strName 
+ * @param[ ] -- strFileName　　："fault12.xls"
+ * @param[ ] -- type           ： fault1 : 1   fault3: 3
+ */
+void CTRDPServerDlg::getFaultConfig(mapFaultInfo &mapInfo, CString strFileName, int iType) 
+{	
+#if 0  // 写入文件 调试 
+	CFile file; //定义文件变量
+	CString filename = (".//variableTest_fault.log");
+
+	if (file.Open(filename, CFile::modeCreate | CFile::modeWrite | CFile::shareDenyRead)) { 
+		file.SeekToBegin(); //到达文件开头 
+	}
+#endif 
+	CString path = "C:\\config\\" + strFileName;
+	path.Replace("\\", "\\\\");
+
+	CSpreadSheet xls_fault1(path, "Sheet1"); // dru_config
+
+	CStringArray Rows;  // 定义工作表的行和列
+	CStringArray Column; 
+	int index = 0;
+	CString str;
+	int t;                     // 临时变量
+	int iNumIndex     = 0;     // 端口中的变量 字索引
+
+    int iLength = xls_fault1.GetTotalRows();
+	printf("Length : %d\n", iLength);
+
+    for (index=2; index <= iLength; index++) {  
+        xls_fault1.ReadRow(Rows, index); // 逐行读取
+
+        int iNumTmp = 0;
+        /* 解析每一行的内容 */
+        str = Rows.GetAt(0);   // COMID
+        if (str != "") {
+            sscanf(str, "%d", &t);
+            iNumTmp = t;
+        } else {
+            continue;
+        }
+
+        str = Rows.GetAt(2);
+		CString strName;
+		if (str != "" && iNumTmp != 0) {
+			if (iType == 1) {
+				strName = str + "c1all";
+				strName.MakeUpper();
+				mapInfo.SetAt(iNumTmp, strName);    // 插入到map，key:编号， value:文件名
+			} else if (iType == 3) {
+				strName = str + "man";
+				strName.MakeUpper();
+				mapInfo.SetAt(iNumTmp, strName);    // 插入到map，key:编号， value:文件名
+			}
+		} else {
+			printf("NULL------------------: \r\n");
+        }
+    }
+
+#if 0
+	CString  strEditTmp;
+
+	/* 遍历map中的数据 */
+	int iKey;
+	CString strValue = _T("");
+	POSITION pos = mapInfo.GetStartPosition();
+
+	while (pos) {
+		mapInfo.GetNextAssoc(pos, iKey, strValue);
+		strEditTmp.Format("Variable number :%d, name :%s \r\n", iKey, strValue);
+		file.Write(strEditTmp, strEditTmp.GetLength());     // 写入实际数据 
+	}
+	file.Close();
+#endif
+
+	return;
+}
+
+/**
+ * @brief    -- getFaultConfig ：从 strFileName配置 文件中 获取TRDP变量与MVB故障信息的映射关系
+ * @param[ ] -- mapInfo        ：key : 变量名 value:变量字节偏移,位偏移 
+ * @param[ ] -- strFileName    : "fault_1301.xls" "fault_1302.xls"
+ */
+void CTRDPServerDlg::getFaultConfig(mapVarInfo &mapInfo, CString strFileName) 
+{	
+#if 0  // 写入文件 调试 
+	CFile file; //定义文件变量
+	CString filename = (".//variableTest_var1.log");
+
+	if (file.Open(filename, CFile::modeCreate | CFile::modeWrite | CFile::shareDenyRead)) { 
+		file.SeekToBegin(); //到达文件开头 
+	}
+#endif 
+
+	CString path = "C:\\config\\" + strFileName;
+	path.Replace("\\", "\\\\");
+	printf("fileName : %s \r\n", path);
+
+	CSpreadSheet xls_var(path, "Sheet1"); // dru_config
+
+	CStringArray Rows;  // 定义工作表的行和列
+	CStringArray Column; 
+	int index = 0;
+
+	CString str;
+	int t;                     // 临时变量
+	int iNumIndex     = 0;     // 端口中的变量 字索引
+
+    int iLength = xls_var.GetTotalRows();
+	printf("Length : %d\n", iLength);
+    for (index = 2; index <= iLength; index++) {  
+        xls_var.ReadRow(Rows, index); // 逐行读取
+
+        stWordBit stTmp;
+        /* 解析每一行的内容 */
+        str = Rows.GetAt(11);   // word
+        if (str != "") {
+            sscanf(str, "%d", &t);
+            stTmp.iWordOffset = t;
+        } else {
+            continue;
+        }
+
+        str = Rows.GetAt(12);   // word
+        if (str != "") {
+            sscanf(str, "%d", &t);
+            stTmp.iBitOffset = t;
+        } else {
+            continue;
+        }
+
+        CString strVarName = "";
+        strVarName = Rows.GetAt(1);
+        if (strVarName != "") {
+			strVarName.MakeUpper();
+			mapInfo.SetAt(strVarName, stTmp);    // 插入到map，key:编号， value:文件名
+		} else {
+			printf("NULL------------------: \r\n");
+		}
+    }
+
+#if 0
+	CString  strEditTmp;
+
+	/* 遍历map中的数据 */
+	CString strKey = _T("");
+	stWordBit stTest;
+	POSITION pos = mapInfo.GetStartPosition();
+
+	while (pos) {
+		mapInfo.GetNextAssoc(pos, strKey, stTest);
+		strEditTmp.Format("Variable Name:%s, word :%d, bit :%d \r\n", strKey, stTest.iWordOffset, stTest.iBitOffset);
+		file.Write(strEditTmp, strEditTmp.GetLength());     // 写入实际数据 
+	}
+	file.Close();
+#endif 
+
+	return;
+}
+
+
+/**
+ * @brief    -- getVarInfo  :  获取到 目的地址偏移与 trdp数据中的字节偏移、位偏移的映射关系
+ * @param[o] -- stInfo      ：
+ * @param[i] -- fautInfo
+ * @param[i] -- varInfo
+ * @return   -- 
+ */
+int CTRDPServerDlg::getVarInfo(stVarInfo *stInfo, mapFaultInfo &fautInfo, mapVarInfo &varInfo) 
+{
+    int iKey = 0, i = 0; 
+    CString strVal= "";
+
+    stWordBit stVal;
+
+    printf("faultInfo number:%d,\n varInfo Number:%d\n", fautInfo.GetCount(), varInfo.GetCount());
+    if (fautInfo.IsEmpty()) {  
+        return false;
+    } else {
+        POSITION posLocal = fautInfo.GetStartPosition();
+        while (posLocal) {   // 遍历 
+            fautInfo.GetNextAssoc(posLocal, iKey, strVal); 
+			// printf("key:%d, value:%s\n", iKey, strVal);
+
+            if (varInfo.Lookup(strVal, stVal)) { 
+                stInfo[i].iDestNum = iKey - 1;
+                stInfo[i].stOffset.iWordOffset = stVal.iWordOffset;
+                stInfo[i].stOffset.iBitOffset = stVal.iBitOffset;
+                i++;
+			} 
+		}
+	}
+	return i;
+}
